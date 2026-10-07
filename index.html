@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ILY - Sistema de Gestão</title>
+    <title>Ilumy3D - Sistema de Gestão</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Supabase JS Client library -->
@@ -41,7 +41,6 @@
     <div id="screen-login" class="min-h-screen flex items-center justify-center p-4 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-900/20 via-slate-950 to-slate-950">
         <div class="w-full max-w-md p-8 rounded-3xl glass-card shadow-2xl border border-slate-800 space-y-6 flex flex-col items-center">
             <div class="text-center space-y-3 w-full flex flex-col items-center">
-                <!-- Ícone Moderno -->
                 <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-500 shadow-lg shadow-indigo-500/30">
                     <svg class="w-9 h-9 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021-16z"></path>
@@ -81,7 +80,6 @@
                 
                 <div class="w-36 hidden md:block"></div>
 
-                <!-- LOGO + NOME ILY CENTRALIZADOS -->
                 <div class="flex items-center gap-2 absolute left-1/2 -translate-x-1/2">
                     <div class="inline-flex items-center justify-center w-6 h-6 rounded-lg bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-500 shadow-md shadow-indigo-500/20">
                         <svg class="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -90,10 +88,9 @@
                             <line stroke-linecap="round" stroke-linejoin="round" x1="12" y1="22.08" x2="12" y2="12"></line>
                         </svg>
                     </div>
-                    <h1 class="text-base font-black text-white tracking-tight">ILY</h1>
+                    <h1 class="text-base font-black text-white tracking-tight">Ilumy3D</h1>
                 </div>
 
-                <!-- USUÁRIO E BOTÃO SAIR -->
                 <div class="flex items-center gap-2.5 ml-auto">
                     <span id="user-display" class="text-[11px] text-slate-400 font-mono bg-slate-800/80 px-2.5 py-1 rounded-md border border-slate-700/60"></span>
                     <button onclick="fazerLogout()" class="text-[11px] font-semibold text-slate-400 hover:text-red-400 px-2 py-1 rounded-md hover:bg-red-500/10 transition border border-transparent">
@@ -103,10 +100,8 @@
             </div>
         </nav>
 
-        <!-- LAYOUT COM MENU LATERAL E CONTEÚDO EXPANDIDO -->
         <div class="flex-1 flex overflow-hidden">
             
-            <!-- MENU LATERAL ESQUERDO COMPACTO -->
             <aside class="w-48 bg-slate-900/60 border-r border-slate-800 p-3 flex flex-col gap-1.5 shrink-0">
                 <span class="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider px-2 mb-1">Módulos</span>
                 
@@ -114,7 +109,7 @@
                     <span class="text-sm">📋</span> Gestão de Pedidos
                 </button>
 
-                <button id="nav-catalogo" onclick="trocarAba('catalogo')" class="w-full flex items-center gap-2 px-2.5 py-2.5 rounded-xl text-xs font-semibold transition text-slate-400 hover:text-slate-100 hover:bg-slate-800/60">
+                <button id="nav-catalogo" onclick="trocarAba('catalogo'); if(typeof carregarProdutos === 'function') carregarProdutos();" class="w-full flex items-center gap-2 px-2.5 py-2.5 rounded-xl text-xs font-semibold transition text-slate-400 hover:text-slate-100 hover:bg-slate-800/60">
                     <span class="text-sm">📦</span> Catálogo Produtos
                 </button>
 
@@ -127,13 +122,10 @@
                 </button>
             </aside>
 
-            <!-- PAINEL CENTRAL / CONTEÚDO EXPANDIDO -->
             <main class="flex-1 p-4 md:p-6 overflow-y-auto w-full">
                 
                 <!-- ABA 1: GESTÃO DE PEDIDOS (KANBAN) -->
                 <div id="aba-pedidos" class="space-y-4 max-w-[1600px] mx-auto">
-                    
-                    <!-- BARRA COMPACTA POSICIONADA À ESQUERDA -->
                     <div class="flex justify-start my-1">
                         <div class="inline-flex items-center gap-3.5 bg-slate-900/80 p-1.5 px-3.5 rounded-2xl border border-slate-800 shadow-lg backdrop-blur-md">
                             <button onclick="abrirModalNovoPedido()" class="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold px-3.5 py-1.5 rounded-xl text-xs transition shadow-md shadow-indigo-600/20 active:scale-95 flex items-center gap-1.5">
@@ -150,7 +142,6 @@
                     </div>
 
                     <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
-                        <!-- 1. NOVO PEDIDO -->
                         <div class="bg-slate-900/50 p-4 rounded-2xl border border-slate-800 flex flex-col gap-3 kanban-column">
                             <div class="flex items-center justify-between pb-2 border-b border-slate-800">
                                 <span class="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
@@ -161,7 +152,6 @@
                             <div id="coluna-novo" class="flex flex-col gap-3 flex-1"></div>
                         </div>
 
-                        <!-- 2. EM PRODUÇÃO -->
                         <div class="bg-slate-900/50 p-4 rounded-2xl border border-slate-800 flex flex-col gap-3 kanban-column">
                             <div class="flex items-center justify-between pb-2 border-b border-slate-800">
                                 <span class="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
@@ -172,18 +162,16 @@
                             <div id="coluna-producao" class="flex flex-col gap-3 flex-1"></div>
                         </div>
 
-                        <!-- 3. ACABAMENTO / EMBALAGEM -->
                         <div class="bg-slate-900/50 p-4 rounded-2xl border border-slate-800 flex flex-col gap-3 kanban-column">
                             <div class="flex items-center justify-between pb-2 border-b border-slate-800">
                                 <span class="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-                                    <span class="w-2 h-2 rounded-full bg-orange-500"></span> Acabamento / Embalagem
+                                    <span class="w-2 h-2 rounded-full bg-orange-500"></span> Acab. / Embalagem
                                 </span>
                                 <span id="count-embalagem" class="text-xs bg-slate-800 px-2 py-0.5 rounded-full text-slate-300 font-bold">0</span>
                             </div>
                             <div id="coluna-embalagem" class="flex flex-col gap-3 flex-1"></div>
                         </div>
 
-                        <!-- 4. AGUARDANDO ENVIO -->
                         <div class="bg-slate-900/50 p-4 rounded-2xl border border-slate-800 flex flex-col gap-3 kanban-column">
                             <div class="flex items-center justify-between pb-2 border-b border-slate-800">
                                 <span class="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
@@ -194,7 +182,6 @@
                             <div id="coluna-envio" class="flex flex-col gap-3 flex-1"></div>
                         </div>
 
-                        <!-- 5. CONCLUÍDO -->
                         <div class="bg-slate-900/50 p-4 rounded-2xl border border-slate-800 flex flex-col gap-3 kanban-column">
                             <div class="flex items-center justify-between pb-2 border-b border-slate-800">
                                 <span class="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
@@ -211,7 +198,7 @@
                 <div id="aba-catalogo" class="hidden space-y-4 max-w-[1600px] mx-auto">
                     <div class="flex justify-start my-1">
                         <div class="inline-flex items-center gap-3.5 bg-slate-900/80 p-1.5 px-3.5 rounded-2xl border border-slate-800 shadow-lg backdrop-blur-md">
-                            <button onclick="alert('Cadastro de novos SKUs em desenvolvimento!')" class="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold px-3.5 py-1.5 rounded-xl text-xs transition shadow-md shadow-indigo-600/20 active:scale-95 flex items-center gap-1.5">
+                            <button onclick="abrirModalNovoProduto()" class="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold px-3.5 py-1.5 rounded-xl text-xs transition shadow-md shadow-indigo-600/20 active:scale-95 flex items-center gap-1.5">
                                 + Novo Produto SKU
                             </button>
 
@@ -219,13 +206,12 @@
 
                             <span class="text-xs text-slate-300 font-medium flex items-center gap-1.5">
                                 <span class="w-2 h-2 rounded-full bg-indigo-500"></span>
-                                <span>4 SKUs Cadastrados</span>
+                                <span>0 SKU(s) Cadastrado(s)</span>
                             </span>
                         </div>
                     </div>
 
                     <div id="tabela-catalogo-container" class="bg-slate-900/50 rounded-2xl border border-slate-800 p-4 overflow-x-auto">
-                        <!-- Tabela renderizada via JS -->
                     </div>
                 </div>
 
@@ -247,77 +233,404 @@
         </div>
     </div>
 
-    <!-- MODAL DE CADASTRAR / EDITAR PEDIDO -->
-    <div id="modal-novo-pedido" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
-        <div class="bg-slate-900 border border-slate-800 w-full max-w-lg rounded-3xl p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
-            <div class="flex justify-between items-center border-b border-slate-800 pb-3">
-                <h3 id="modal-titulo" class="text-lg font-bold text-white flex items-center gap-2">🛍️ Cadastrar Novo Pedido</h3>
-                <button onclick="fecharModalNovoPedido()" class="text-slate-400 hover:text-white text-xl">✕</button>
+    <!-- MODAL DE CADASTRAR NOVO PEDIDO -->
+    <div id="modal-novo-pedido" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 hidden">
+        <div class="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl p-4 shadow-2xl space-y-3 max-h-[95vh] overflow-y-auto">
+            <div class="flex justify-between items-center border-b border-slate-800 pb-2">
+                <h3 id="modal-titulo" class="text-base font-bold text-white flex items-center gap-2">🛍️ Cadastrar Novo Pedido</h3>
+                <button onclick="fecharModalNovoPedido()" class="text-slate-400 hover:text-white text-lg">✕</button>
             </div>
 
-            <form id="form-pedido" onsubmit="salvarNovoPedido(event)" class="space-y-3">
-                <div>
-                    <label class="block text-xs font-semibold text-slate-400 mb-1">Canal de Venda *</label>
-                    <select id="input-origem" required class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100">
-                        <option value="Shopee">🟠 Shopee</option>
-                        <option value="Mercado Livre">🟡 Mercado Livre</option>
-                        <option value="Site Próprio">🌐 Site Próprio</option>
-                        <option value="WhatsApp">🟢 WhatsApp / Venda Direta</option>
-                    </select>
+            <form id="form-pedido" onsubmit="salvarNovoPedido(event)" class="space-y-2.5">
+                <div class="grid grid-cols-4 gap-2">
+                    <div class="col-span-3">
+                        <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Canal de Venda *</label>
+                        <select id="input-origem" required class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100">
+                            <option value="Shopee">Shopee</option>
+                            <option value="Mercado Livre">Mercado Livre</option>
+                            <option value="Site">Site</option>
+                            <option value="WhatsApp">WhatsApp / Venda Direta</option>
+                        </select>
+                    </div>
+                    <div class="col-span-1">
+                        <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Qtd (un) *</label>
+                        <input type="number" id="input-unidades" value="1" min="1" required class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100 font-bold text-center">
+                    </div>
                 </div>
 
                 <div>
-                    <label class="block text-xs font-semibold text-slate-400 mb-1">Selecione o Produto (Catálogo) *</label>
-                    <select id="input-produto-sku" onchange="autoPreencherProduto()" required class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100">
+                    <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Selecione o Produto (Catálogo) *</label>
+                    <select id="input-produto-sku" onchange="autoPreencherProduto()" required class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100">
                         <option value="">-- Escolha um Produto --</option>
-                        <option value="PRD-001">#PRD-001 - Suporte Headset PS5</option>
-                        <option value="PRD-002">#PRD-002 - Vasinho Decorativo LowPoly</option>
-                        <option value="PRD-003">#PRD-003 - Base Action Figure Diorama</option>
-                        <option value="PRD-004">#PRD-004 - Engrenagem Personalizada</option>
                     </select>
                 </div>
 
-                <div class="grid grid-cols-2 gap-3">
+                <div class="grid grid-cols-2 gap-2.5">
                     <div>
-                        <label class="block text-xs font-semibold text-slate-400 mb-1">Nome do Cliente *</label>
-                        <input type="text" id="input-cliente" required placeholder="Ex: Ana Maria" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100">
+                        <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Nome do Cliente *</label>
+                        <input type="text" id="input-cliente" required placeholder="Ex: Ana Maria" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100">
                     </div>
                     <div>
-                        <label class="block text-xs font-semibold text-slate-400 mb-1">Código do Pedido</label>
-                        <input type="text" id="input-codigo" placeholder="Ex: #SHP-9821" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100">
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-2 gap-3">
-                    <div>
-                        <label class="block text-xs font-semibold text-slate-400 mb-1">Valor Total (R$) *</label>
-                        <input type="number" step="0.01" id="input-valor" required placeholder="45.00" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-semibold text-slate-400 mb-1">Filamento / Cor</label>
-                        <input type="text" id="input-insumo" placeholder="Ex: PLA Preto Matte" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100">
+                        <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Código do Pedido</label>
+                        <input type="text" id="input-codigo" placeholder="Ex: #SHP-9821" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100">
                     </div>
                 </div>
 
-                <div class="grid grid-cols-2 gap-3">
+                <div class="grid grid-cols-2 gap-2.5">
                     <div>
-                        <label class="block text-xs font-semibold text-slate-400 mb-1">Prazo de Envio</label>
-                        <input type="date" id="input-prazo" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100">
+                        <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Valor Total (R$) *</label>
+                        <input type="number" step="0.01" id="input-valor" required placeholder="45.00" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100">
                     </div>
                     <div>
-                        <label class="block text-xs font-semibold text-slate-400 mb-1">Código de Rastreio</label>
-                        <input type="text" id="input-rastreio" placeholder="Ex: BR123456789" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100">
+                        <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Filamento / Cor</label>
+                        <input type="text" id="input-insumo" placeholder="Ex: PLA Preto Matte" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2.5">
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Data do Pedido *</label>
+                        <input type="date" id="input-data-pedido" required class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Prazo de Envio</label>
+                        <input type="date" id="input-prazo" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100">
                     </div>
                 </div>
 
                 <div>
-                    <label class="block text-xs font-semibold text-slate-400 mb-1">Observações / Especificações</label>
-                    <textarea id="input-obs" rows="2" placeholder="Ex: Troca de cor na camada 42, embalagem reforçada" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-100"></textarea>
+                    <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Código de Rastreio</label>
+                    <input type="text" id="input-rastreio" placeholder="Ex: BR123456789" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100">
                 </div>
 
-                <div class="flex justify-end gap-3 pt-3 border-t border-slate-800">
-                    <button type="button" onclick="fecharModalNovoPedido()" class="px-5 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white">Cancelar</button>
-                    <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-5 py-2.5 rounded-xl text-xs">Salvar Pedido</button>
+                <div>
+                    <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Observações / Especificações</label>
+                    <textarea id="input-obs" rows="1.5" placeholder="Ex: Troca de cor na camada 42" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100"></textarea>
+                </div>
+
+                <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
+                    <button type="button" onclick="fecharModalNovoPedido()" class="px-4 py-2 rounded-lg text-xs font-semibold text-slate-400 hover:text-white">Cancelar</button>
+                    <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-2 rounded-lg text-xs">Salvar Pedido</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL DE EDITAR PEDIDO -->
+    <div id="modal-editar-pedido" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 hidden">
+        <div class="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl p-4 shadow-2xl space-y-3 max-h-[95vh] overflow-y-auto">
+            <div class="flex justify-between items-center border-b border-slate-800 pb-2">
+                <h3 class="text-base font-bold text-white flex items-center gap-2">✏️ Editar Pedido</h3>
+                <button onclick="fecharModalEditarPedido()" class="text-slate-400 hover:text-white text-lg">✕</button>
+            </div>
+
+            <form id="form-editar-pedido" onsubmit="salvarEdicaoPedido(event)" class="space-y-2.5">
+                <input type="hidden" id="input-editar-id">
+
+                <div class="grid grid-cols-4 gap-2">
+                    <div class="col-span-3">
+                        <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Canal de Venda *</label>
+                        <select id="input-editar-origem" required class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100">
+                            <option value="Shopee">Shopee</option>
+                            <option value="Mercado Livre">Mercado Livre</option>
+                            <option value="Site">Site</option>
+                            <option value="WhatsApp">WhatsApp / Venda Direta</option>
+                        </select>
+                    </div>
+                    <div class="col-span-1">
+                        <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Qtd (un) *</label>
+                        <input type="number" id="input-editar-unidades" value="1" min="1" required class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100 font-bold text-center">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Produto *</label>
+                    <input type="text" id="input-editar-produto" required class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100">
+                </div>
+
+                <div class="grid grid-cols-2 gap-2.5">
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Nome do Cliente *</label>
+                        <input type="text" id="input-editar-cliente" required class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Código do Pedido</label>
+                        <input type="text" id="input-editar-codigo" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2.5">
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Valor Total (R$) *</label>
+                        <input type="number" step="0.01" id="input-editar-valor" required class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Filamento / Cor</label>
+                        <input type="text" id="input-editar-insumo" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2.5">
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Data do Pedido</label>
+                        <input type="date" id="input-editar-data-pedido" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Prazo de Envio</label>
+                        <input type="date" id="input-editar-prazo" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Observações / Especificações</label>
+                    <textarea id="input-editar-obs" rows="1.5" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100"></textarea>
+                </div>
+
+                <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
+                    <button type="button" onclick="fecharModalEditarPedido()" class="px-4 py-2 rounded-lg text-xs font-semibold text-slate-400 hover:text-white">Cancelar</button>
+                    <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-2 rounded-lg text-xs">Salvar Alterações</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL APENAS LEITURA DE DETALHES DO PRODUTO -->
+    <div id="modal-detalhes-produto" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 hidden">
+        <div class="bg-slate-900 border border-slate-800 w-full max-w-lg rounded-2xl p-5 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto relative">
+            <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+                <div class="flex items-center gap-2">
+                    <span class="text-xs bg-indigo-950/80 border border-indigo-700/60 text-indigo-300 px-2 py-0.5 rounded font-mono font-bold" id="detalhe-prod-sku">SKU</span>
+                    <h3 id="detalhe-prod-nome" class="text-base font-bold text-white">Nome do Produto</h3>
+                </div>
+                <button onclick="fecharModalDetalhesProduto()" class="text-slate-400 hover:text-white text-lg">✕</button>
+            </div>
+
+            <div class="space-y-4 text-xs">
+                <div class="flex items-start gap-4 bg-slate-950/60 p-3 rounded-xl border border-slate-800/80">
+                    <img id="detalhe-prod-foto" src="" alt="Foto do Produto" class="w-24 h-24 object-cover rounded-xl border border-slate-800 shrink-0 hidden">
+                    <div id="detalhe-prod-foto-placeholder" class="w-24 h-24 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center text-2xl shrink-0">📦</div>
+
+                    <div class="space-y-1.5 flex-1">
+                        <div>
+                            <span class="text-[10px] text-slate-500 uppercase font-bold block">Categoria</span>
+                            <span id="detalhe-prod-categoria" class="text-slate-200 font-semibold">-</span>
+                        </div>
+                        <div>
+                            <span class="text-[10px] text-slate-500 uppercase font-bold block">Insumo(s) / Cores (AMS)</span>
+                            <div id="detalhe-prod-insumo" class="flex flex-wrap gap-1 pt-0.5"></div>
+                        </div>
+                        <div>
+                            <span class="text-[10px] text-slate-500 uppercase font-bold block">Bico Recomendado</span>
+                            <span id="detalhe-prod-bico" class="text-indigo-400 font-mono font-bold">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+                    <div class="bg-slate-950/40 p-2 rounded-xl border border-slate-800/60">
+                        <span class="text-[10px] text-slate-500 uppercase font-bold block">Tempo Impr.</span>
+                        <span id="detalhe-prod-tempo" class="text-amber-400 font-mono font-bold">-</span>
+                    </div>
+                    <div class="bg-slate-950/40 p-2 rounded-xl border border-slate-800/60">
+                        <span class="text-[10px] text-slate-500 uppercase font-bold block">Peso</span>
+                        <span id="detalhe-prod-peso" class="text-slate-300 font-mono font-bold">-</span>
+                    </div>
+                    <div class="bg-slate-950/40 p-2 rounded-xl border border-slate-800/60">
+                        <span class="text-[10px] text-slate-500 uppercase font-bold block">Custo Est.</span>
+                        <span id="detalhe-prod-custo" class="text-slate-400 font-mono font-bold">-</span>
+                    </div>
+                    <div class="bg-slate-950/40 p-2 rounded-xl border border-slate-800/60">
+                        <span class="text-[10px] text-slate-500 uppercase font-bold block">Preço Base</span>
+                        <span id="detalhe-prod-preco" class="text-emerald-400 font-mono font-bold">-</span>
+                    </div>
+                </div>
+
+                <div class="space-y-2 bg-slate-950/30 p-3 rounded-xl border border-slate-800/60 text-[11px]">
+                    <div>
+                        <span class="text-slate-500 font-bold">Estoque Pronta-Entrega:</span>
+                        <span id="detalhe-prod-estoque" class="text-slate-200 font-semibold ml-1">0 un</span>
+                    </div>
+                    <div>
+                        <span class="text-slate-500 font-bold">Troca de cor / AMS:</span>
+                        <span id="detalhe-prod-ams" class="text-slate-200 font-semibold ml-1">Não</span>
+                    </div>
+                    <div>
+                        <span class="text-slate-500 font-bold">Insumos Extras (BOM):</span>
+                        <span id="detalhe-prod-extras" class="text-slate-200 ml-1">-</span>
+                    </div>
+                    <div>
+                        <span class="text-slate-500 font-bold">Pós-Processamento:</span>
+                        <span id="detalhe-prod-pos" class="text-slate-200 ml-1">-</span>
+                    </div>
+                    <div id="wrapper-detalhe-gcode" class="hidden">
+                        <span class="text-slate-500 font-bold">Link GCode:</span>
+                        <a id="detalhe-prod-gcode" href="#" target="_blank" class="text-indigo-400 hover:underline ml-1 truncate inline-block max-w-full align-bottom">Abrir Link</a>
+                    </div>
+                    <div id="wrapper-detalhe-modelo" class="hidden">
+                        <span class="text-slate-500 font-bold">Modelo Original:</span>
+                        <a id="detalhe-prod-modelo" href="#" target="_blank" class="text-indigo-400 hover:underline ml-1 truncate inline-block max-w-full align-bottom">Abrir Modelo</a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex justify-end pt-2 border-t border-slate-800">
+                <button type="button" onclick="fecharModalDetalhesProduto()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-lg text-xs transition">Fechar Consulta</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL DE CADASTRAR / EDITAR PRODUTO -->
+    <div id="modal-novo-produto" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 hidden">
+        <div class="bg-slate-900 border border-slate-800 w-full max-w-lg rounded-2xl p-5 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto">
+            <div class="flex justify-between items-center border-b border-slate-800 pb-2">
+                <h3 id="modal-produto-titulo" class="text-base font-bold text-white flex items-center gap-2">📦 Cadastrar Novo Produto (SKU)</h3>
+                <button onclick="fecharModalNovoProduto()" class="text-slate-400 hover:text-white text-lg">✕</button>
+            </div>
+
+            <form id="form-produto" onsubmit="salvarProduto(event)" class="space-y-3">
+                <input type="hidden" id="input-produto-id">
+                <input type="hidden" id="input-prod-imagem-url">
+
+                <div class="grid grid-cols-3 gap-2.5">
+                    <div class="col-span-2">
+                        <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Nome do Produto *</label>
+                        <input type="text" id="input-prod-nome" required placeholder="Ex: Suporte Headset PS5" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500">
+                    </div>
+                    <div class="col-span-1">
+                        <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Categoria</label>
+                        <input type="text" id="input-prod-categoria" list="lista-categorias-sugeridas" placeholder="Selecione ou digite..." class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500">
+                        <datalist id="lista-categorias-sugeridas">
+                            <option value="Geek & Games"></option>
+                            <option value="Casa & Decoração"></option>
+                            <option value="Vasos & Jardinagem"></option>
+                            <option value="Luminárias & Iluminação"></option>
+                            <option value="Utilidades & Acessórios"></option>
+                            <option value="Escritório & Setup"></option>
+                            <option value="Colecionáveis & Action Figures"></option>
+                        </datalist>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2.5">
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Código / SKU</label>
+                        <input type="text" id="input-prod-sku" placeholder="Ex: PRD-001" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Bico Recomendado</label>
+                        <select id="input-prod-bico" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500">
+                            <option value="0.4mm" selected>0.4mm (Padrão)</option>
+                            <option value="0.2mm">0.2mm (Alta Precisão)</option>
+                            <option value="0.6mm">0.6mm (Rápido)</option>
+                            <option value="0.8mm">0.8mm (Ultra Rápido)</option>
+                            <option value="1.0mm">1.0mm (Estrutural)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- CAMPO COM UPLOAD DE FOTO DIRETO DO COMPUTADOR -->
+                <div class="space-y-1.5 pt-1">
+                    <label class="block text-[11px] font-semibold text-slate-400">Foto do Produto (Upload do Computador)</label>
+                    <div class="flex items-center gap-3 bg-slate-950/60 p-2.5 rounded-xl border border-slate-800">
+                        <div class="w-12 h-12 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center shrink-0 overflow-hidden relative">
+                            <img id="preview-foto-produto" src="" class="w-full h-full object-cover hidden">
+                            <span id="preview-foto-placeholder" class="text-slate-600 text-lg">🖼️</span>
+                        </div>
+                        <div class="flex-1 space-y-1">
+                            <input type="file" id="input-prod-arquivo" accept="image/*" onchange="previewEUploadImagem(event)" class="block w-full text-[11px] text-slate-400 file:mr-2 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:text-[10px] file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 cursor-pointer">
+                            <p id="upload-status-text" class="text-[10px] text-slate-500 font-mono">Nenhum arquivo enviado</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="space-y-1.5 pt-1">
+                    <label class="block text-[11px] font-semibold text-slate-400">Insumo(s) / Cores (AMS)</label>
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <button type="button" onclick="toggleInputInsumo()" class="h-8 px-2.5 bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/50 rounded-lg text-indigo-300 text-xs font-bold transition flex items-center gap-1 shrink-0">
+                            <span>+</span>
+                            <span class="text-[11px]">Adicionar Insumo</span>
+                        </button>
+
+                        <div id="wrapper-input-insumo" class="hidden relative">
+                            <input type="text" id="input-prod-insumo" list="lista-insumos-sugeridos" placeholder="Buscar ou digitar..." class="w-48 bg-slate-950 border border-indigo-500 rounded-lg p-1.5 text-xs text-slate-100 focus:outline-none">
+                            <datalist id="lista-insumos-sugeridos">
+                                <option value="PLA Preto Matte"></option>
+                                <option value="PLA Branco Matte"></option>
+                                <option value="PLA Cinza"></option>
+                                <option value="PLA Vermelho"></option>
+                                <option value="PLA Azul"></option>
+                                <option value="PLA Verde"></option>
+                                <option value="PLA Amarelo"></option>
+                                <option value="PLA Silk Dourado"></option>
+                                <option value="PLA Silk Prata"></option>
+                                <option value="PETG Preto"></option>
+                                <option value="PETG Transparente"></option>
+                                <option value="ABS Preto"></option>
+                            </datalist>
+                        </div>
+
+                        <div id="container-tags-insumos" class="flex flex-wrap items-center gap-1.5">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-3 gap-2.5">
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Tempo Impr.</label>
+                        <input type="text" id="input-prod-tempo" placeholder="Ex: 02h 30m" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Peso (g)</label>
+                        <input type="number" id="input-prod-peso" placeholder="Ex: 120" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Estoque Pronta-Entrega</label>
+                        <input type="number" id="input-prod-estoque" placeholder="0" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2.5">
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Custo Estimado (R$)</label>
+                        <input type="number" step="0.01" id="input-prod-custo" placeholder="12.50" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Preço Base (R$) *</label>
+                        <input type="number" step="0.01" id="input-prod-preco" placeholder="45.00" required class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500">
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2 pt-1">
+                    <input type="checkbox" id="input-prod-ams" class="w-4 h-4 rounded border-slate-800 bg-slate-950 text-indigo-600 focus:ring-0">
+                    <label for="input-prod-ams" class="text-xs text-slate-300 font-medium">Exige troca de cor automática (AMS / Multicor)</label>
+                </div>
+
+                <div class="space-y-2 pt-1 border-t border-slate-800/80">
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Link / Arquivo GCode (MakerWorld, Printables, Google Drive)</label>
+                        <input type="url" id="input-prod-gcode" placeholder="https://..." class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500">
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2.5">
+                        <div>
+                            <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Insumos Extras / Montagem (BOM)</label>
+                            <input type="text" id="input-prod-insumos-extra" placeholder="Ex: 2x Ímã 6x2mm" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500">
+                        </div>
+                        <div>
+                            <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Pós-Processamento / Acabamento</label>
+                            <input type="text" id="input-prod-pos-processamento" placeholder="Ex: Remover suportes e lixar" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">Link do Modelo 3D Original / Licença Commercial</label>
+                        <input type="url" id="input-prod-link-modelo" placeholder="https://..." class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500">
+                    </div>
+                </div>
+
+                <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
+                    <button type="button" onclick="fecharModalNovoProduto()" class="px-4 py-2 rounded-lg text-xs font-semibold text-slate-400 hover:text-white">Cancelar</button>
+                    <button type="submit" id="btn-salvar-produto" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-2 rounded-lg text-xs">Salvar Produto</button>
                 </div>
             </form>
         </div>
@@ -326,5 +639,31 @@
     <!-- CARREGAMENTO DOS MÓDULOS JS -->
     <script src="assets/js/modules/auth.js"></script>
     <script src="assets/js/modules/pedidos.js"></script>
+    <script src="assets/js/modules/produtos.js"></script>
+
+    <script>
+        function trocarAba(nomeAba) {
+            document.getElementById('aba-pedidos').classList.add('hidden');
+            document.getElementById('aba-catalogo').classList.add('hidden');
+            document.getElementById('aba-estoque').classList.add('hidden');
+            document.getElementById('aba-financas').classList.add('hidden');
+
+            const botoes = ['nav-pedidos', 'nav-catalogo', 'nav-estoque', 'nav-financas'];
+            botoes.forEach(id => {
+                const btn = document.getElementById(id);
+                if (btn) {
+                    btn.className = "w-full flex items-center gap-2 px-2.5 py-2.5 rounded-xl text-xs font-semibold transition text-slate-400 hover:text-slate-100 hover:bg-slate-800/60";
+                }
+            });
+
+            const abaAlvo = document.getElementById(`aba-${nomeAba}`);
+            const btnAlvo = document.getElementById(`nav-${nomeAba}`);
+
+            if (abaAlvo) abaAlvo.classList.remove('hidden');
+            if (btnAlvo) {
+                btnAlvo.className = "w-full flex items-center gap-2 px-2.5 py-2.5 rounded-xl text-xs font-bold transition bg-indigo-600 text-white shadow-lg shadow-indigo-600/20";
+            }
+        }
+    </script>
 </body>
 </html>
