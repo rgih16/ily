@@ -5,6 +5,30 @@ let categoriaFiltroAtual = 'Todas';
 let termoBuscaAtual = '';
 let insumosSelecionadosModal = [];
 
+// Preenche a lista de sugestões de insumos do Catálogo com os filamentos cadastrados no Estoque (incluindo o ID)
+async function carregarSugestoesInsumosCatalogo() {
+    const datalist = document.getElementById('lista-insumos-sugeridos');
+    if (!datalist) return;
+
+    try {
+        const { data: filamentos, error } = await _supabase
+            .from('filamentos')
+            .select('id, marca, material, cor')
+            .order('marca', { ascending: true });
+
+        if (error) throw error;
+
+        datalist.innerHTML = '';
+
+        (filamentos || []).forEach(f => {
+            const nomeFormatado = `[ID:${f.id}] ${f.material} ${f.cor} (${f.marca})`;
+            datalist.innerHTML += `<option value="${nomeFormatado}">`;
+        });
+    } catch (err) {
+        console.error('Erro ao carregar insumos do estoque para o catálogo:', err);
+    }
+}
+
 async function carregarProdutos() {
     try {
         const { data, error } = await _supabase
@@ -232,19 +256,16 @@ async function previewEUploadImagem(event) {
         if (statusText) statusText.textContent = '⏳ Enviando foto...';
         if (btnSalvar) btnSalvar.disabled = true;
 
-        // Gera nome único para o arquivo
         const fileExt = file.name.split('.').pop();
         const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${fileExt}`;
         const filePath = `produtos/${fileName}`;
 
-        // Upload para o bucket
         const { data, error } = await _supabase.storage
             .from('produtos-imagens')
             .upload(filePath, file);
 
         if (error) throw error;
 
-        // Obter URL pública
         const { data: publicData } = _supabase.storage
             .from('produtos-imagens')
             .getPublicUrl(filePath);
@@ -339,7 +360,7 @@ function configurarListenersInsumo() {
     });
 }
 
-function abrirModalNovoProduto() {
+async function abrirModalNovoProduto() {
     const modal = document.getElementById('modal-novo-produto');
     if (!modal) return;
     
@@ -349,6 +370,7 @@ function abrirModalNovoProduto() {
     insumosSelecionadosModal = [];
     renderizarTagsInsumosModal();
     configurarListenersInsumo();
+    await carregarSugestoesInsumosCatalogo();
 
     const wrapperInput = document.getElementById('wrapper-input-insumo');
     if (wrapperInput) wrapperInput.classList.add('hidden');
@@ -430,9 +452,11 @@ async function salvarProduto(event) {
     }
 }
 
-function abrirModalEditarProduto(id) {
+async function abrirModalEditarProduto(id) {
     const produto = listaProdutosGlobal.find(p => p.id === id);
     if (!produto) return;
+
+    await carregarSugestoesInsumosCatalogo();
 
     if (document.getElementById('input-produto-id')) document.getElementById('input-produto-id').value = produto.id;
     if (document.getElementById('input-prod-nome')) document.getElementById('input-prod-nome').value = produto.nome || '';

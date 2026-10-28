@@ -2,10 +2,28 @@
 // MÓDULO DE AUTENTICAÇÃO E SESSÃO (ILUMY3D)
 // ==========================================
 
-window.onload = function() {
-    if (localStorage.getItem('3dcontrol_logado') === 'true') {
-        const emailSalvo = localStorage.getItem('3dcontrol_email') || 'renato.rustiguelli@gmail.com';
-        exibirApp(emailSalvo);
+const adminsAutorizados = ['renato.rustiguelli@gmail.com', 'gaheustaquio@gmail.com'];
+
+// Restaura a sessão real do Supabase (persistida pelo próprio client) ao abrir a página
+window.onload = async function() {
+    // Remove os flags do login antigo, que não validavam a senha
+    localStorage.removeItem('3dcontrol_logado');
+    localStorage.removeItem('3dcontrol_email');
+
+    try {
+        const { data, error } = await _supabase.auth.getSession();
+        if (error) throw error;
+
+        const email = data.session?.user?.email?.toLowerCase();
+        if (!email) return;
+
+        if (adminsAutorizados.includes(email)) {
+            exibirApp(email);
+        } else {
+            await _supabase.auth.signOut();
+        }
+    } catch (err) {
+        console.error('Erro ao restaurar sessão do Supabase:', err);
     }
 };
 
@@ -18,13 +36,17 @@ async function fazerLogin(event) {
     const passwordInput = document.getElementById('login-password');
     const errorBox = document.getElementById('login-error');
 
+    const mostrarErro = (mensagem) => {
+        if (errorBox) {
+            errorBox.innerText = mensagem;
+            errorBox.classList.remove('hidden');
+        }
+    };
+
     if (errorBox) errorBox.classList.add('hidden');
 
     if (!emailInput || !passwordInput) {
-        if (errorBox) {
-            errorBox.innerText = "Campos do formulário não encontrados.";
-            errorBox.classList.remove('hidden');
-        }
+        mostrarErro("Campos do formulário não encontrados.");
         return false;
     }
 
@@ -32,58 +54,42 @@ async function fazerLogin(event) {
     const senha = passwordInput.value;
 
     if (!email || !senha) {
-        if (errorBox) {
-            errorBox.innerText = "Por favor, preencha o e-mail e a senha.";
-            errorBox.classList.remove('hidden');
-        }
+        mostrarErro("Por favor, preencha o e-mail e a senha.");
         return false;
     }
-
-    const adminsAutorizados = ['renato.rustiguelli@gmail.com', 'gaheustaquio@gmail.com'];
 
     if (!adminsAutorizados.includes(email)) {
-        if (errorBox) {
-            errorBox.innerText = "E-mail não autorizado para acesso administrativo.";
-            errorBox.classList.remove('hidden');
-        }
+        mostrarErro("E-mail não autorizado para acesso administrativo.");
         return false;
     }
 
-    // Tenta autenticação via Supabase Client
+    // A senha é sempre validada pelo Supabase Auth; sem sessão válida não há acesso
     try {
-        if (typeof supabaseClient !== 'undefined' && supabaseClient) {
-            const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password: senha });
-            if (error) {
-                if (errorBox) {
-                    errorBox.innerText = "E-mail ou senha incorretos no Supabase: " + error.message;
-                    errorBox.classList.remove('hidden');
-                }
-                return false;
-            }
+        const { error } = await _supabase.auth.signInWithPassword({ email, password: senha });
+        if (error) {
+            const falhaDeRede = !error.status || error.message === 'Failed to fetch';
+            mostrarErro(falhaDeRede
+                ? "Não foi possível conectar ao servidor de autenticação. Tente novamente."
+                : "E-mail ou senha incorretos.");
+            return false;
         }
     } catch (err) {
-        console.warn("Aviso na conexão Supabase, procedendo com validação local autorizada.", err);
+        console.error('Erro na conexão com o Supabase:', err);
+        mostrarErro("Não foi possível conectar ao servidor de autenticação. Tente novamente.");
+        return false;
     }
 
-    // Sucesso na autenticação
-    localStorage.setItem('3dcontrol_logado', 'true');
-    localStorage.setItem('3dcontrol_email', email);
     exibirApp(email);
     return false;
 }
 
-function fazerLogout() {
-    localStorage.removeItem('3dcontrol_logado');
-    localStorage.removeItem('3dcontrol_email');
-    
+async function fazerLogout() {
     try {
-        if (typeof supabaseClient !== 'undefined' && supabaseClient) {
-            supabaseClient.auth.signOut();
-        }
-    } catch(e) {
-        console.log("Logout local efetuado.");
+        await _supabase.auth.signOut();
+    } catch (err) {
+        console.error('Erro ao encerrar sessão no Supabase:', err);
     }
-    
+
     const appScreen = document.getElementById('screen-app');
     const loginScreen = document.getElementById('screen-login');
     const passInput = document.getElementById('login-password');
@@ -101,7 +107,7 @@ function exibirApp(email) {
     if (loginScreen) loginScreen.classList.add('hidden');
     if (appScreen) appScreen.classList.remove('hidden');
     if (userDisp) userDisp.innerText = email;
-    
+
     // Inicia o carregamento dos pedidos quando entra no app
     if (typeof carregarPedidos === 'function') {
         carregarPedidos();
