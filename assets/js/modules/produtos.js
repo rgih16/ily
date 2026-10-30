@@ -13,15 +13,16 @@ async function carregarSugestoesInsumosCatalogo() {
     try {
         const { data: filamentos, error } = await _supabase
             .from('filamentos')
-            .select('id, marca, material, cor')
-            .order('marca', { ascending: true });
+            .select('id, material, cor')
+            .order('material', { ascending: true })
+            .order('cor', { ascending: true });
 
         if (error) throw error;
 
         datalist.innerHTML = '';
 
         (filamentos || []).forEach(f => {
-            const nomeFormatado = `[ID:${f.id}] ${f.material} ${f.cor} (${f.marca})`;
+            const nomeFormatado = `[ID:${f.id}] ${f.material} ${f.cor}`;
             datalist.innerHTML += `<option value="${nomeFormatado}">`;
         });
     } catch (err) {
@@ -31,6 +32,12 @@ async function carregarSugestoesInsumosCatalogo() {
 
 async function carregarProdutos() {
     try {
+        // A precificação usa os parâmetros financeiros e o custo médio dos filamentos
+        if (typeof carregarConfigFinanceira === 'function') await carregarConfigFinanceira();
+        if (typeof carregarFilamentos === 'function' && (typeof listaFilamentosGlobal === 'undefined' || listaFilamentosGlobal.length === 0)) {
+            await carregarFilamentos();
+        }
+
         const { data, error } = await _supabase
             .from('produtos')
             .select('*')
@@ -74,17 +81,8 @@ function renderizarFiltrosEBarraBusca() {
         wrapperControles.id = 'catalogo-controles';
         wrapperControles.className = 'space-y-3 mb-4';
         
+        // A busca fica no topo da aba (index.html), no mesmo padrão da Gestão de Pedidos
         wrapperControles.innerHTML = `
-            <div class="flex items-center gap-3">
-                <div class="relative flex-1">
-                    <input type="text" id="input-busca-produto" oninput="filtrarPorTexto(this.value)" placeholder="🔍 Buscar por nome do produto, SKU ou insumo..." class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 pl-9">
-                    <span class="absolute left-3 top-2.5 text-slate-500 text-xs">🔍</span>
-                </div>
-                <div id="contador-produtos-filtrados" class="text-xs text-slate-400 font-mono whitespace-nowrap">
-                    0 produto(s)
-                </div>
-            </div>
-
             <div id="pílulas-categorias" class="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
             </div>
         `;
@@ -106,7 +104,14 @@ function renderizarFiltrosEBarraBusca() {
 
 function filtrarPorTexto(texto) {
     termoBuscaAtual = texto.toLowerCase().trim();
+    document.getElementById('btn-limpar-busca-produto')?.classList.toggle('hidden', !termoBuscaAtual);
     aplicarFiltrosEExibir();
+}
+
+function limparBuscaProdutos() {
+    const input = document.getElementById('input-busca-produto');
+    if (input) input.value = '';
+    filtrarPorTexto('');
 }
 
 function filtrarPorCategoria(categoria) {
@@ -127,11 +132,6 @@ function aplicarFiltrosEExibir() {
     });
 
     renderizarTabelaProdutos(filtrados);
-
-    const contador = document.getElementById('contador-produtos-filtrados');
-    if (contador) {
-        contador.textContent = `Exibindo ${filtrados.length} de ${listaProdutosGlobal.length} SKU(s)`;
-    }
 }
 
 function renderizarTabelaProdutos(produtos) {
@@ -158,8 +158,8 @@ function renderizarTabelaProdutos(produtos) {
                         <th class="p-3">Categoria</th>
                         <th class="p-3">Insumo / Bico</th>
                         <th class="p-3">Tempo / Peso</th>
-                        <th class="p-3">Custo Est.</th>
-                        <th class="p-3">Preço Base</th>
+                        <th class="p-3">Custo</th>
+                        <th class="p-3">Preço por canal</th>
                         <th class="p-3 text-center">Pronta Entrega</th>
                         <th class="p-3 text-right">Ações</th>
                     </tr>
@@ -167,10 +167,23 @@ function renderizarTabelaProdutos(produtos) {
                 <tbody class="divide-y divide-slate-800/60 bg-slate-900/40">
     `;
 
+    // Cores das bolinhas de canal (mesmas classes do Kanban)
+    const corCanalLista = { 'Shopee': 'bg-shopee', 'Mercado Livre': 'bg-ml', 'Site': 'bg-site', 'WhatsApp': 'bg-wts' };
+
     produtos.forEach(item => {
-        const precoFormatado = Number(item.preco_base || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-        const custoFormatado = Number(item.custo_estimado || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-        
+        // Custo e preços calculados na hora com os parâmetros atuais
+        const precificacao = typeof precificacaoProduto === 'function' ? precificacaoProduto(item) : null;
+        const custoFormatado = moedaProduto(precificacao ? precificacao.custo.total : item.custo_estimado);
+        const precosCanais = precificacao
+            ? CANAIS_VENDA.map(canal => {
+                const info = precificacao.canais[canal];
+                return `<div class="flex items-center justify-between gap-2 whitespace-nowrap">
+                    <span class="flex items-center gap-1 text-[10px] text-slate-400"><span class="w-1.5 h-1.5 rounded-full ${corCanalLista[canal]}"></span>${canal}</span>
+                    <span class="text-emerald-400 font-bold">${moedaProduto(info.preco)}${info.fixo ? ' <span class="text-[9px] text-amber-400" title="Preço fixado à mão">●</span>' : ''}</span>
+                </div>`;
+            }).join('')
+            : `<span class="text-emerald-400 font-bold">${moedaProduto(item.preco_base)}</span>`;
+
         html += `
             <tr class="hover:bg-slate-800/40 transition">
                 <td class="p-3">
@@ -200,8 +213,11 @@ function renderizarTabelaProdutos(produtos) {
                     <div class="text-amber-400">⏱️ ${item.tempo_impressao || '-'}</div>
                     <div class="text-slate-400 text-[10px]">${item.peso_gramas ? item.peso_gramas + 'g' : '-'}</div>
                 </td>
-                <td class="p-3 font-mono text-slate-400">${custoFormatado}</td>
-                <td class="p-3 font-mono font-bold text-emerald-400">${precoFormatado}</td>
+                <td class="p-3 font-mono text-slate-400">
+                    <div>${custoFormatado}</div>
+                    ${precificacao ? `<div class="text-[10px] text-slate-500">margem ${precificacao.margem.pct.toLocaleString('pt-BR')}%</div>` : ''}
+                </td>
+                <td class="p-3 font-mono space-y-0.5 min-w-[150px]">${precosCanais}</td>
                 <td class="p-3 text-center font-mono">
                     <span class="px-2 py-0.5 rounded border text-[11px] ${item.estoque_pronta_entrega > 0 ? 'bg-emerald-950/60 border-emerald-800 text-emerald-400 font-bold' : 'bg-slate-950 border-slate-800 text-slate-600'}">
                         📦 ${item.estoque_pronta_entrega || 0}
@@ -225,7 +241,8 @@ function renderizarTabelaProdutos(produtos) {
 
     const contadorAba = document.querySelector('#aba-catalogo span span:last-child');
     if (contadorAba) {
-        contadorAba.textContent = `${produtos.length} SKU(s) Cadastrado(s)`;
+        // Total cadastrado, não o resultado da busca/filtro
+        contadorAba.textContent = `${listaProdutosGlobal.length} SKU(s) Cadastrado(s)`;
     }
 }
 
@@ -306,10 +323,11 @@ function toggleInputInsumo() {
 function adicionarTagInsumo(nomeInsumo) {
     const limpo = nomeInsumo.trim();
     if (!limpo) return;
-    
+
     if (!insumosSelecionadosModal.includes(limpo)) {
         insumosSelecionadosModal.push(limpo);
         renderizarTagsInsumosModal();
+        atualizarPrecificacaoModal();
     }
     
     const input = document.getElementById('input-prod-insumo');
@@ -322,6 +340,115 @@ function adicionarTagInsumo(nomeInsumo) {
 function removerTagInsumo(index) {
     insumosSelecionadosModal.splice(index, 1);
     renderizarTagsInsumosModal();
+    atualizarPrecificacaoModal();
+}
+
+// ==========================================
+// PRECIFICAÇÃO NO CADASTRO DO PRODUTO
+// ==========================================
+const moedaProduto = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const idCanalPreco = (canal) => canal.toLowerCase().replace(/\s+/g, '-');
+
+// Produto "em edição" montado a partir do formulário, para o cálculo ao vivo
+function produtoDoFormularioPreco() {
+    const num = (id) => {
+        const v = document.getElementById(id)?.value;
+        return v === '' || v == null ? null : parseFloat(v);
+    };
+    const precos_fixos = {};
+    CANAIS_VENDA.forEach(canal => {
+        const v = num(`input-prod-preco-${idCanalPreco(canal)}`);
+        if (v > 0) precos_fixos[canal] = v;
+    });
+    return {
+        peso_gramas: num('input-prod-peso') || 0,
+        tempo_impressao: document.getElementById('input-prod-tempo')?.value || '',
+        insumo_padrao: insumosSelecionadosModal.join(', '),
+        custo_embalagem: num('input-prod-embalagem') || 0,
+        margem_pct: num('input-prod-margem'),
+        precos_fixos
+    };
+}
+
+// Monta a tabela de preços por canal (os campos de preço ficam; só os textos são atualizados ao digitar)
+function montarTabelaPrecosModal(fixos = {}) {
+    const el = document.getElementById('prod-tabela-precos');
+    if (!el) return;
+    el.innerHTML = `
+        <div class="grid grid-cols-[1.3fr_0.7fr_1fr_1.1fr_1fr_1fr] gap-x-2 gap-y-1 items-center text-[11px]">
+            <span class="text-slate-500 font-semibold">Canal</span>
+            <span class="text-slate-500 font-semibold text-right">Taxa</span>
+            <span class="text-slate-500 font-semibold text-right">Sugerido</span>
+            <span class="text-slate-500 font-semibold text-center">Preço</span>
+            <span class="text-slate-500 font-semibold text-right">Você recebe</span>
+            <span class="text-slate-500 font-semibold text-right">Lucro</span>
+            ${CANAIS_VENDA.map(canal => {
+                const id = idCanalPreco(canal);
+                return `
+                <span class="text-slate-200 font-semibold">${canal}</span>
+                <span id="prod-taxa-${id}" class="text-right text-slate-400 font-mono"></span>
+                <span id="prod-sugerido-${id}" class="text-right text-slate-300 font-mono"></span>
+                <input type="number" step="0.01" min="0" id="input-prod-preco-${id}" value="${Number(fixos[canal]) > 0 ? fixos[canal] : ''}" oninput="atualizarPrecificacaoModal()" class="w-full bg-slate-950 border border-slate-800 rounded-md p-1 text-xs text-slate-100 text-center focus:outline-none focus:border-indigo-500">
+                <span id="prod-recebe-${id}" class="text-right text-emerald-300 font-mono"></span>
+                <span id="prod-lucro-${id}" class="text-right font-mono"></span>`;
+            }).join('')}
+        </div>`;
+}
+
+function atualizarPrecificacaoModal() {
+    if (typeof precificacaoProduto !== 'function' || !document.getElementById('prod-resumo-custo')) return;
+    const produto = produtoDoFormularioPreco();
+    const p = precificacaoProduto(produto);
+    const c = p.custo;
+
+    const margemInput = document.getElementById('input-prod-margem');
+    if (margemInput) margemInput.placeholder = `padrão: ${Number(configFinanceira.margem_padrao_pct ?? 100)}%`;
+
+    const linha = (rotulo, valor, extra = '', classe = 'text-slate-300') =>
+        `<div class="flex justify-between gap-2"><span class="text-slate-400">${rotulo}${extra ? ` <span class="text-slate-500">${extra}</span>` : ''}</span><span class="font-mono ${classe}">${valor}</span></div>`;
+    document.getElementById('prod-resumo-custo').innerHTML = `
+        ${linha('Filamento', moedaProduto(c.filamento), `${c.peso}g × ${moedaProduto(c.custoG)}/g${c.filamentoEstimado ? ' (custo padrão: filamento não achado no estoque)' : ''}`)}
+        ${linha('Máquina', moedaProduto(c.maquina), `${c.horas.toFixed(2).replace('.', ',')} h × ${moedaProduto(custoHoraImpressao())}/h`)}
+        ${linha('Embalagem e insumos', moedaProduto(c.embalagem))}
+        <div class="flex justify-between gap-2 border-t border-slate-800 pt-1 font-semibold"><span class="text-slate-200">(=) Custo de produção</span><span class="font-mono text-slate-100">${moedaProduto(c.total)}</span></div>
+        ${linha('Margem', `${p.margem.pct.toLocaleString('pt-BR')}%`, p.margem.origem === 'padrao' ? '(padrão)' : '')}
+        <div class="flex justify-between gap-2 font-semibold"><span class="text-slate-200">(=) Você quer receber por unidade</span><span class="font-mono text-emerald-300">${moedaProduto(p.alvo)}</span></div>
+    `;
+
+    CANAIS_VENDA.forEach(canal => {
+        const id = idCanalPreco(canal);
+        const info = p.canais[canal];
+        const set = (pref, txt, classe) => {
+            const e = document.getElementById(`${pref}-${id}`);
+            if (!e) return;
+            e.textContent = txt;
+            if (classe) e.className = classe;
+        };
+        set('prod-taxa', `${info.pct.toLocaleString('pt-BR')}%`);
+        set('prod-sugerido', moedaProduto(info.sugerido));
+        const input = document.getElementById(`input-prod-preco-${id}`);
+        if (input) input.placeholder = info.sugerido.toFixed(2);
+        set('prod-recebe', moedaProduto(info.recebe));
+        set('prod-lucro', moedaProduto(info.lucro), `text-right font-mono ${info.lucro >= 0 ? 'text-emerald-400' : 'text-red-400'}`);
+    });
+}
+
+// Abre a seção de precificação do modal com os dados do produto (ou vazia, no cadastro)
+async function prepararPrecificacaoModal(produto = null) {
+    if (typeof carregarConfigFinanceira === 'function') await carregarConfigFinanceira();
+    if (typeof carregarFilamentos === 'function' && (typeof listaFilamentosGlobal === 'undefined' || listaFilamentosGlobal.length === 0)) {
+        await carregarFilamentos();
+    }
+    document.getElementById('input-prod-embalagem').value = produto && Number(produto.custo_embalagem) > 0 ? produto.custo_embalagem : '';
+    // Produto antigo sem margem gravada: preenche a margem que reproduz o preço atual, para nada mudar ao salvar
+    let margem = '';
+    if (produto) {
+        const m = margemDoProduto(produto, custoProducaoProduto(produto).total);
+        if (m.origem !== 'padrao') margem = m.pct;
+    }
+    document.getElementById('input-prod-margem').value = margem;
+    montarTabelaPrecosModal(produto?.precos_fixos || {});
+    atualizarPrecificacaoModal();
 }
 
 function renderizarTagsInsumosModal() {
@@ -391,7 +518,8 @@ async function abrirModalNovoProduto() {
 
     const titulo = document.getElementById('modal-produto-titulo');
     if (titulo) titulo.innerText = '📦 Cadastrar Novo Produto (SKU)';
-    
+
+    await prepararPrecificacaoModal();
     modal.classList.remove('hidden');
 }
 
@@ -414,6 +542,10 @@ async function salvarProduto(event) {
 
     const insumoFinal = insumosSelecionadosModal.join(', ');
 
+    // Custo e preços vêm da precificação; preco_base = preço da venda direta (WhatsApp/Pix)
+    const formPreco = produtoDoFormularioPreco();
+    const precificacao = precificacaoProduto(formPreco);
+
     const dadosProduto = {
         nome: document.getElementById('input-prod-nome')?.value,
         sku: document.getElementById('input-prod-sku')?.value,
@@ -423,8 +555,11 @@ async function salvarProduto(event) {
         peso_gramas: document.getElementById('input-prod-peso')?.value ? parseInt(document.getElementById('input-prod-peso').value, 10) : null,
         insumo_padrao: insumoFinal,
         bico_recomendado: document.getElementById('input-prod-bico')?.value || '0.4mm',
-        custo_estimado: document.getElementById('input-prod-custo')?.value ? parseFloat(document.getElementById('input-prod-custo').value) : 0,
-        preco_base: document.getElementById('input-prod-preco')?.value ? parseFloat(document.getElementById('input-prod-preco').value) : 0,
+        custo_estimado: Math.round(precificacao.custo.total * 100) / 100,
+        preco_base: precificacao.canais['WhatsApp'].preco,
+        custo_embalagem: formPreco.custo_embalagem,
+        margem_pct: formPreco.margem_pct,
+        precos_fixos: formPreco.precos_fixos,
         estoque_pronta_entrega: document.getElementById('input-prod-estoque')?.value ? parseInt(document.getElementById('input-prod-estoque').value, 10) : 0,
         troca_cor_ams: document.getElementById('input-prod-ams')?.checked || insumosSelecionadosModal.length > 1,
         gcode_link: document.getElementById('input-prod-gcode')?.value || '',
@@ -468,6 +603,10 @@ async function abrirModalEditarProduto(id) {
     const placeholder = document.getElementById('preview-foto-placeholder');
     const statusText = document.getElementById('upload-status-text');
 
+    // O formulário não é resetado na edição: sem isso, o campo mostraria o nome do arquivo enviado no produto anterior
+    const inputArquivo = document.getElementById('input-prod-arquivo');
+    if (inputArquivo) inputArquivo.value = '';
+
     if (produto.imagem_url && previewImg && placeholder) {
         previewImg.src = produto.imagem_url;
         previewImg.classList.remove('hidden');
@@ -494,8 +633,6 @@ async function abrirModalEditarProduto(id) {
     if (wrapperInput) wrapperInput.classList.add('hidden');
 
     if (document.getElementById('input-prod-bico')) document.getElementById('input-prod-bico').value = produto.bico_recomendado || '0.4mm';
-    if (document.getElementById('input-prod-custo')) document.getElementById('input-prod-custo').value = produto.custo_estimado || '';
-    if (document.getElementById('input-prod-preco')) document.getElementById('input-prod-preco').value = produto.preco_base || '';
     if (document.getElementById('input-prod-estoque')) document.getElementById('input-prod-estoque').value = produto.estoque_pronta_entrega || 0;
     if (document.getElementById('input-prod-ams')) document.getElementById('input-prod-ams').checked = !!produto.troca_cor_ams;
     if (document.getElementById('input-prod-gcode')) document.getElementById('input-prod-gcode').value = produto.gcode_link || '';
@@ -506,6 +643,7 @@ async function abrirModalEditarProduto(id) {
     const titulo = document.getElementById('modal-produto-titulo');
     if (titulo) titulo.innerText = '✏️ Editar Produto (SKU)';
 
+    await prepararPrecificacaoModal(produto);
     const modal = document.getElementById('modal-novo-produto');
     if (modal) modal.classList.remove('hidden');
 }

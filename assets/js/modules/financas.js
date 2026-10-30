@@ -1,18 +1,61 @@
 // assets/js/modules/financas.js
+//
+// Onde cada informação fica gravada (Supabase):
+// - config_financeira (linha única): taxas por canal, custo por hora de impressão e imposto (%).
+// - pedidos: além da venda, cada pedido guarda os valores do dia em que foi criado
+//   (custo_insumo, custo_maquina, taxa_estimada, imposto_estimado, frete_pago) e, ao receber,
+//   o valor_liquido_recebido. Mudar a configuração depois não altera pedidos antigos.
+// - despesas: todo gasto do negócio (consumíveis, frete, manutenção, impostos, lançamentos de custos fixos...).
+// - custos_fixos: modelos recorrentes com vigência; geram um lançamento em "despesas" por mês.
+// - filamento_compras: compras de filamento (viram estoque; o custo entra no DRE quando o filamento é usado).
 
 let visaoFinanceiraAtual = 'competencia'; // 'competencia' ou 'caixa'
-let listaCustosFixosGlobal = [];
-let listaConsumiveisGlobal = [];
 let chartEvolucaoInstance = null;
 let chartCanaisInstance = null;
 
-// Configuração padrão de taxas/comissões por canal de venda (%)
-let taxasCanaisConfig = {
-    'Shopee': 15,
-    'Mercado Livre': 10,
-    'Site': 3,
-    'WhatsApp': 0
+const CATEGORIAS_DESPESA = ['Custo fixo', 'Impostos', 'Consumíveis', 'Ferramentas', 'Frete', 'Manutenção & Peças', 'Marketing', 'Outros', 'Equipamentos / Investimento'];
+// Investimento vira um bem da empresa: sai do caixa, mas não é gasto do mês na visão de vendas
+const CATEGORIA_INVESTIMENTO = 'Equipamentos / Investimento';
+const CORES_CATEGORIA = {
+    'Equipamentos / Investimento': 'bg-purple-950/80 border-purple-700/60 text-purple-300',
+    'Ferramentas': 'bg-orange-950/80 border-orange-700/60 text-orange-300',
+    'Custo fixo': 'bg-indigo-950/80 border-indigo-700/60 text-indigo-300',
+    'Impostos': 'bg-rose-950/80 border-rose-700/60 text-rose-300',
+    'Consumíveis': 'bg-teal-950/80 border-teal-700/60 text-teal-300',
+    'Frete': 'bg-sky-950/80 border-sky-700/60 text-sky-300',
+    'Manutenção & Peças': 'bg-amber-950/80 border-amber-700/60 text-amber-300',
+    'Marketing': 'bg-fuchsia-950/80 border-fuchsia-700/60 text-fuchsia-300',
+    'Outros': 'bg-slate-800 border-slate-700 text-slate-300'
 };
+const CANAIS_VENDA = ['Shopee', 'Mercado Livre', 'Site', 'WhatsApp'];
+
+const CONFIG_FINANCEIRA_PADRAO = {
+    taxas_canais: {
+        'Shopee': { pct: 15, fixa: 0 },
+        'Mercado Livre': { pct: 10, fixa: 0 },
+        'Site': { pct: 3, fixa: 0 },
+        'WhatsApp': { pct: 0, fixa: 0 }
+    },
+    potencia_media_w: 150,
+    tarifa_kwh: 0.90,
+    depreciacao_hora: 0.50,
+    imposto_pct: 0,
+    // Precificação: margem sobre o custo de produção usada quando o produto não tem a sua
+    margem_padrao_pct: 100,
+    arredondar_90: true,
+    // Site e WhatsApp: taxa da maquininha/gateway por forma de pagamento (somada à taxa do canal)
+    taxas_pagamento: {
+        'Pix': 0,
+        'Dinheiro': 0,
+        'Débito': 0,
+        'Crédito': { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0, 11: 0, 12: 0 },
+        recebimento_padrao: 'na_hora',
+        juros_cliente_padrao: false
+    }
+};
+const FORMAS_PAGAMENTO = ['Pix', 'Dinheiro', 'Débito', 'Crédito'];
+const MAX_PARCELAS = 12;
+let configFinanceira = JSON.parse(JSON.stringify(CONFIG_FINANCEIRA_PADRAO));
 
 // Função auxiliar para obter o cliente Supabase em qualquer escopo
 function obterSupabaseClient() {
@@ -22,6 +65,13 @@ function obterSupabaseClient() {
         if (window.supabaseClient) return window.supabaseClient;
     }
     return null;
+}
+
+const moedaBR = (valor) => Number(valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+// Escapa texto digitado pelo usuário antes de inserir no HTML
+function escaparHtml(texto) {
+    return String(texto ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 // Extrai ano e mês de forma à prova de fusos horários
@@ -42,6 +92,24 @@ function extrairAnoMes(dataValor) {
     return null;
 }
 
+// "AAAA-MM-DD" do dia de hoje no fuso local
+function hojeISO() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// Mês selecionado no filtro (AAAA-MM); preenche com o mês atual se vazio
+function mesSelecionadoFinancas() {
+    const inputMes = document.getElementById('filtro-financas-mes');
+    if (inputMes && !inputMes.value) inputMes.value = hojeISO().slice(0, 7);
+    return inputMes ? inputMes.value : hojeISO().slice(0, 7);
+}
+
+function ultimoDiaDoMes(anoMes) {
+    const [ano, mes] = anoMes.split('-').map(Number);
+    return `${anoMes}-${String(new Date(ano, mes, 0).getDate()).padStart(2, '0')}`;
+}
+
 // Função Global do Accordion
 function toggleAccordion(id) {
     const el = document.getElementById(id);
@@ -58,34 +126,463 @@ function toggleAccordion(id) {
     }
 }
 
-function carregarTaxasSalvas() {
-    const salvos = localStorage.getItem('ilumy3d_taxas_canais');
-    if (salvos) {
-        try {
-            taxasCanaisConfig = { ...taxasCanaisConfig, ...JSON.parse(salvos) };
-        } catch (e) {
-            console.error('Erro ao ler taxas do localStorage:', e);
+// ==========================================
+// CONFIGURAÇÃO FINANCEIRA (BANCO)
+// ==========================================
+async function carregarConfigFinanceira() {
+    try {
+        const client = obterSupabaseClient();
+        if (!client) return configFinanceira;
+
+        const { data, error } = await client.from('config_financeira').select('*').eq('id', 1).single();
+        if (error) throw error;
+
+        if (data) {
+            configFinanceira = {
+                ...CONFIG_FINANCEIRA_PADRAO,
+                ...data,
+                taxas_canais: { ...CONFIG_FINANCEIRA_PADRAO.taxas_canais, ...(data.taxas_canais || {}) },
+                taxas_pagamento: {
+                    ...CONFIG_FINANCEIRA_PADRAO.taxas_pagamento,
+                    ...(data.taxas_pagamento || {}),
+                    'Crédito': { ...CONFIG_FINANCEIRA_PADRAO.taxas_pagamento['Crédito'], ...((data.taxas_pagamento || {})['Crédito'] || {}) }
+                }
+            };
         }
+
+        // Taxas antigas salvas só neste navegador: leva para o banco uma única vez
+        const taxasLocais = localStorage.getItem('ilumy3d_taxas_canais');
+        if (taxasLocais) {
+            try {
+                const antigas = JSON.parse(taxasLocais);
+                Object.entries(antigas || {}).forEach(([canal, pct]) => {
+                    if (configFinanceira.taxas_canais[canal]) configFinanceira.taxas_canais[canal].pct = Number(pct) || 0;
+                });
+                await client.from('config_financeira').update({ taxas_canais: configFinanceira.taxas_canais, updated_at: new Date().toISOString() }).eq('id', 1);
+            } catch (e) {
+                console.error('Erro ao migrar taxas do navegador para o banco:', e);
+            }
+            localStorage.removeItem('ilumy3d_taxas_canais');
+        }
+    } catch (err) {
+        console.error('Erro ao carregar configuração financeira:', err.message || err);
+    }
+    return configFinanceira;
+}
+
+function custoHoraImpressao(cfg = configFinanceira) {
+    const energia = (Number(cfg.potencia_media_w) || 0) / 1000 * (Number(cfg.tarifa_kwh) || 0);
+    return energia + (Number(cfg.depreciacao_hora) || 0);
+}
+
+function normalizarCanal(origem) {
+    if (origem === 'Site Próprio') return 'Site';
+    return origem || 'WhatsApp';
+}
+
+function taxaDoCanal(origem, cfg = configFinanceira) {
+    const canal = normalizarCanal(origem);
+    const taxa = (cfg.taxas_canais || {})[canal] || { pct: 0, fixa: 0 };
+    return { pct: Number(taxa.pct) || 0, fixa: Number(taxa.fixa) || 0 };
+}
+
+// "02h 30m", "2:30" ou "2" (horas) -> minutos por unidade
+function minutosDeImpressao(tempoStr) {
+    if (!tempoStr) return 0;
+    const str = String(tempoStr).toLowerCase();
+    const h = str.match(/(\d+)\s*h/);
+    const m = str.match(/(\d+)\s*m/);
+    if (h || m) return (h ? parseInt(h[1], 10) * 60 : 0) + (m ? parseInt(m[1], 10) : 0);
+    if (str.includes(':')) {
+        const [hh, mm] = str.split(':');
+        return (parseInt(hh, 10) || 0) * 60 + (parseInt(mm, 10) || 0);
+    }
+    return (parseFloat(str) || 0) * 60;
+}
+
+// Canais em que quem recebe o pagamento é a empresa (maquininha, app, gateway); nos marketplaces é a plataforma
+const CANAIS_PAGAMENTO_PROPRIO = ['Site', 'WhatsApp'];
+
+// % da forma de pagamento. Crédito com juros pagos pelo cliente usa a taxa de 1x (a diferença fica com ele)
+function taxaFormaPagamento({ origem, formaPagamento, parcelas, jurosCliente }, cfg = configFinanceira) {
+    if (!CANAIS_PAGAMENTO_PROPRIO.includes(normalizarCanal(origem)) || !formaPagamento) return 0;
+    const tabela = cfg.taxas_pagamento || CONFIG_FINANCEIRA_PADRAO.taxas_pagamento;
+    if (formaPagamento !== 'Crédito') return Number(tabela[formaPagamento]) || 0;
+    const n = jurosCliente ? 1 : Math.min(Math.max(parseInt(parcelas, 10) || 1, 1), MAX_PARCELAS);
+    return Number((tabela['Crédito'] || {})[n]) || 0;
+}
+
+// Valores congelados no pedido no momento da criação, pela configuração vigente
+function calcularValoresFinanceirosPedido({ origem, valorUnitario, quantidade, tempoImpressao, formaPagamento, parcelas, jurosCliente }, cfg = configFinanceira) {
+    const qtd = parseInt(quantidade, 10) || 1;
+    const bruto = (Number(valorUnitario) || 0) * qtd;
+    const taxa = taxaDoCanal(origem, cfg);
+    const pctPagamento = taxaFormaPagamento({ origem, formaPagamento, parcelas, jurosCliente }, cfg);
+    const horas = (minutosDeImpressao(tempoImpressao) * qtd) / 60;
+
+    const arred = (v) => Math.round(v * 100) / 100;
+    return {
+        taxa_estimada: arred(bruto * ((taxa.pct + pctPagamento) / 100) + taxa.fixa * qtd),
+        imposto_estimado: arred(bruto * ((Number(cfg.imposto_pct) || 0) / 100)),
+        custo_maquina: arred(horas * custoHoraImpressao(cfg))
+    };
+}
+
+// Composição financeira de um pedido. Usa os valores gravados no pedido; para pedidos antigos
+// (sem esses campos) estima com a configuração e o custo médio atuais.
+function financeiroDoPedido(p, filamentos = (typeof listaFilamentosGlobal !== 'undefined' ? listaFilamentosGlobal : [])) {
+    const qtd = parseInt(p.quantidade_unidades || p.quantidade || 1, 10) || 1;
+    const bruto = (Number(p.valor_total) || 0) * qtd;
+    const estimado = calcularValoresFinanceirosPedido({
+        origem: p.origem, valorUnitario: p.valor_total, quantidade: qtd, tempoImpressao: p.tempo_impressao,
+        formaPagamento: p.forma_pagamento, parcelas: p.parcelas, jurosCliente: p.juros_cliente
+    });
+
+    const temLiquido = p.valor_liquido_recebido !== null && p.valor_liquido_recebido !== undefined && p.valor_liquido_recebido !== '';
+    const taxa = temLiquido
+        ? Math.max(bruto - Number(p.valor_liquido_recebido), 0)
+        : (p.taxa_estimada != null ? Number(p.taxa_estimada) : estimado.taxa_estimada);
+
+    // Filamento por item: [{ nome, filamento_id, peso_g, custo_total, gravado }]
+    let filamentoItens = [];
+    if (Array.isArray(p.custo_insumo_detalhe) && p.custo_insumo_detalhe.length > 0) {
+        filamentoItens = p.custo_insumo_detalhe.map(item => ({
+            nome: item.nome || 'Filamento',
+            filamento_id: item.filamento_id,
+            peso_g: Number(item.peso_g) || 0,
+            custo_total: (Number(item.peso_g) || 0) * (Number(item.custo_g) || 0),
+            gravado: true
+        }));
+    } else {
+        const peso = Number(p.peso_consumido_g || 0);
+        if (peso > 0) {
+            let usados = (typeof resolverCarreteisDoInsumo === 'function') ? resolverCarreteisDoInsumo(p.insumo, filamentos) : [];
+            if (usados.length === 0 && p.filamento_id) usados = (filamentos || []).filter(f => String(f.id) === String(p.filamento_id));
+            if (usados.length === 0) {
+                filamentoItens = [{ nome: 'Filamento não identificado', filamento_id: null, peso_g: peso, custo_total: peso * 0.09, gravado: false }];
+            } else {
+                const parte = peso / usados.length;
+                filamentoItens = usados.map(f => ({
+                    nome: `${f.material || ''} ${f.cor || ''}`.trim(),
+                    filamento_id: f.id,
+                    peso_g: parte,
+                    custo_total: parte * (Number(f.custo_medio_g) > 0 ? Number(f.custo_medio_g) : 0.09),
+                    gravado: false
+                }));
+            }
+        }
+    }
+
+    const filamento = filamentoItens.reduce((acc, i) => acc + i.custo_total, 0);
+    const maquina = p.custo_maquina != null ? Number(p.custo_maquina) : estimado.custo_maquina;
+    const imposto = p.imposto_estimado != null ? Number(p.imposto_estimado) : estimado.imposto_estimado;
+    const frete = Number(p.frete_pago || 0);
+    const lucro = bruto - taxa - imposto - filamento - maquina - frete;
+
+    return {
+        bruto, taxa, taxaReal: temLiquido, imposto, filamento, filamentoItens, maquina, frete, lucro,
+        horas: (minutosDeImpressao(p.tempo_impressao) * qtd) / 60,
+        valoresGravados: p.taxa_estimada != null || p.custo_maquina != null
+    };
+}
+
+// ==========================================
+// PRECIFICAÇÃO DE PRODUTOS
+// ==========================================
+// Custo de produção de 1 unidade: filamento (peso × custo médio dos carretéis do produto) +
+// máquina (horas × custo/hora) + embalagem e insumos. Sem custo médio cadastrado, usa R$ 0,09/g.
+const CUSTO_FILAMENTO_PADRAO_G = 0.09;
+
+function custoProducaoProduto(produto, filamentos = (typeof listaFilamentosGlobal !== 'undefined' ? listaFilamentosGlobal : []), cfg = configFinanceira) {
+    const peso = Number(produto.peso_gramas) || 0;
+    const carreteis = typeof resolverCarreteisDoInsumo === 'function' ? resolverCarreteisDoInsumo(produto.insumo_padrao, filamentos) : [];
+    const custosG = carreteis.map(f => Number(f.custo_medio_g) > 0 ? Number(f.custo_medio_g) : CUSTO_FILAMENTO_PADRAO_G);
+    const custoG = custosG.length ? custosG.reduce((a, b) => a + b, 0) / custosG.length : CUSTO_FILAMENTO_PADRAO_G;
+    const horas = minutosDeImpressao(produto.tempo_impressao) / 60;
+
+    const filamento = peso * custoG;
+    const maquina = horas * custoHoraImpressao(cfg);
+    const embalagem = Number(produto.custo_embalagem) || 0;
+    return { filamento, maquina, embalagem, total: filamento + maquina + embalagem, peso, custoG, horas, filamentoEstimado: carreteis.length === 0 };
+}
+
+// % que sai do preço em cada canal: comissão + imposto (+ Pix nos canais próprios, que é a base deles)
+function percentualDescontadoCanal(canal, cfg = configFinanceira) {
+    const pctPix = CANAIS_PAGAMENTO_PROPRIO.includes(canal) ? taxaFormaPagamento({ origem: canal, formaPagamento: 'Pix' }, cfg) : 0;
+    return taxaDoCanal(canal, cfg).pct + (Number(cfg.imposto_pct) || 0) + pctPix;
+}
+
+// Quanto cai na conta vendendo 1 unidade por "preco" no canal
+function liquidoDoPrecoCanal(preco, canal, cfg = configFinanceira) {
+    return preco * (1 - percentualDescontadoCanal(canal, cfg) / 100) - taxaDoCanal(canal, cfg).fixa;
+}
+
+// Preço terminando em ,90, para cima, para não receber menos que o desejado (75,56 → 75,90; 5,37 → 5,90).
+// Tolerância de R$ 0,10 para baixo, para preço redondo não subir quase R$ 1 (80,00 → 79,90).
+function arredondarPreco90(valor) {
+    const abaixo = Math.floor(valor) - 0.1;
+    const escolhido = valor - abaixo <= 0.1 + 1e-9 ? abaixo : abaixo + 1;
+    return Math.round(Math.max(escolhido, 0.9) * 100) / 100;
+}
+
+// Margem do produto (% sobre o custo). Produto antigo sem margem gravada: deduz a margem do preço base
+// (tratado como preço de venda direta), para os preços não mudarem sozinhos.
+function margemDoProduto(produto, custoTotal, cfg = configFinanceira) {
+    if (produto.margem_pct !== null && produto.margem_pct !== undefined && produto.margem_pct !== '') {
+        return { pct: Number(produto.margem_pct), origem: 'produto' };
+    }
+    if (Number(produto.preco_base) > 0 && custoTotal > 0) {
+        const liquido = liquidoDoPrecoCanal(Number(produto.preco_base), 'WhatsApp', cfg);
+        // Arredonda para baixo: com o arredondamento para cima do preço, não pode passar do preço antigo
+        return { pct: Math.floor(((liquido / custoTotal) - 1) * 1000) / 10, origem: 'preco_antigo' };
+    }
+    return { pct: Number(cfg.margem_padrao_pct ?? 100), origem: 'padrao' };
+}
+
+// Preço por canal para receber o mesmo valor líquido em todos: (alvo + tarifa fixa) ÷ (1 − % descontado)
+function precificacaoProduto(produto, cfg = configFinanceira) {
+    const custo = custoProducaoProduto(produto, undefined, cfg);
+    const margem = margemDoProduto(produto, custo.total, cfg);
+    const alvo = custo.total * (1 + margem.pct / 100);
+    const fixos = produto.precos_fixos || {};
+
+    const canais = {};
+    CANAIS_VENDA.forEach(canal => {
+        const bruto = (alvo + taxaDoCanal(canal, cfg).fixa) / (1 - percentualDescontadoCanal(canal, cfg) / 100);
+        const sugerido = cfg.arredondar_90 === false ? Math.round(bruto * 100) / 100 : arredondarPreco90(bruto);
+        const fixo = Number(fixos[canal]) > 0 ? Number(fixos[canal]) : null;
+        const preco = fixo ?? sugerido;
+        const recebe = liquidoDoPrecoCanal(preco, canal, cfg);
+        canais[canal] = { pct: percentualDescontadoCanal(canal, cfg), sugerido, fixo, preco, recebe, lucro: recebe - custo.total };
+    });
+    return { custo, margem, alvo, canais };
+}
+
+function precoProdutoNoCanal(produto, canal) {
+    if (!produto) return 0;
+    const p = precificacaoProduto(produto);
+    return (p.canais[normalizarCanal(canal)] || p.canais['WhatsApp']).preco;
+}
+
+// Crédito parcelado recebido mês a mês (Site/WhatsApp): o dinheiro entra em parcelas, a 1ª um mês
+// depois da data do pedido (data da venda no cartão) e as demais nos meses seguintes, no mesmo dia.
+function pedidoRecebeMesAMes(p) {
+    return CANAIS_PAGAMENTO_PROPRIO.includes(normalizarCanal(p.origem)) &&
+        p.forma_pagamento === 'Crédito' && Number(p.parcelas) > 1 && p.recebimento_parcelado === 'mes_a_mes';
+}
+
+// [{ numero, total, data: 'AAAA-MM-DD', valor }] — valor líquido (já sem a taxa), a última parcela leva o arredondamento
+function parcelasDoPedido(p, filamentos) {
+    if (!pedidoRecebeMesAMes(p)) return [];
+    const base = String(p.data_pedido || p.created_at || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(base)) return [];
+
+    const fin = financeiroDoPedido(p, filamentos);
+    const liquido = Math.round((fin.bruto - fin.taxa) * 100) / 100;
+    const n = Number(p.parcelas);
+    const valorParcela = Math.floor((liquido / n) * 100) / 100;
+    const [ano, mes, dia] = base.split('-').map(Number);
+
+    return Array.from({ length: n }, (_, i) => {
+        const ultimoDia = new Date(ano, mes + i + 1, 0).getDate(); // último dia do mês da parcela i+1
+        const d = new Date(ano, mes + i, Math.min(dia, ultimoDia)); // mes é 1-based: (mes - 1) + (i + 1)
+        const data = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        const valor = i === n - 1 ? Math.round((liquido - valorParcela * (n - 1)) * 100) / 100 : valorParcela;
+        return { numero: i + 1, total: n, data, valor };
+    });
+}
+
+// Linhas do painel "Financeiro" do pop-up do pedido
+function renderizarResumoFinanceiroPedido(pedido, elementoId = 'resumo-financeiro-pedido') {
+    const el = document.getElementById(elementoId);
+    if (!el || !pedido) return;
+
+    const f = financeiroDoPedido(pedido);
+    const margem = f.bruto > 0 ? (f.lucro / f.bruto) * 100 : 0;
+    // O material já foi pago na compra do rolo: o que volta para cobri-lo é retorno do
+    // investimento, não lucro. Retorno = lucro + material; lucro é o que sobra além disso.
+    const material = f.filamentoItens.reduce((acc, i) => acc + Number(i.custo_total || 0), 0);
+    const retorno = f.lucro + material;
+    const sobreMaterial = material > 0 ? (f.lucro / material) * 100 : null;
+
+    const linha = (rotulo, valor, extra = '', cor = 'text-red-300') => `
+        <div class="flex justify-between gap-2"><span class="text-slate-400">${rotulo}${extra ? ` <span class="text-[10px] text-slate-500">${extra}</span>` : ''}</span><span class="font-mono ${cor}">${valor}</span></div>`;
+    const sublinha = (rotulo, valor, extra = '', cor = 'text-slate-300') => `
+        <div class="flex justify-between gap-2 pl-3"><span class="text-slate-400">↳ ${rotulo}${extra ? ` <span class="text-[10px] text-slate-500">${extra}</span>` : ''}</span><span class="font-mono ${cor}">${valor}</span></div>`;
+
+    // O título "Financeiro" e a origem dos custos ficam no cabeçalho do painel (pop-up do pedido)
+    el.innerHTML = `
+        ${linha('Receita bruta (preço de venda)', moedaBR(f.bruto), '', 'text-emerald-300')}
+        ${linha('(-) Taxa da plataforma', '- ' + moedaBR(f.taxa), f.taxaReal ? '(real: venda − valor recebido)' : '(estimada)')}
+        <div class="flex justify-between gap-2 py-0.5 border-y border-slate-800/80 font-semibold">
+            <span class="text-slate-200">${pedidoRecebeMesAMes(pedido)
+                ? `(=) Valor a receber em ${pedido.parcelas}x${f.taxaReal ? '' : ' (estimado)'}`
+                : (f.taxaReal ? '(=) Valor que caiu na conta' : '(=) Valor a receber (estimado)')}</span>
+            <span class="font-mono text-emerald-300">${moedaBR(f.bruto - f.taxa)}</span>
+        </div>
+        ${f.imposto > 0 ? linha('(-) Imposto', '- ' + moedaBR(f.imposto)) : ''}
+        ${linha('(-) Máquina (energia + depreciação)', '- ' + moedaBR(f.maquina), `${f.horas.toFixed(1)} h`)}
+        ${f.frete > 0 ? linha('(-) Frete pago', '- ' + moedaBR(f.frete)) : ''}
+        <div class="flex justify-between gap-2 pt-1 border-t border-slate-800 font-semibold">
+            <span class="text-slate-200">(=) Retorno do pedido</span>
+            <span class="font-mono text-emerald-300">${moedaBR(retorno)}</span>
+        </div>
+        ${f.filamentoItens.map(i => sublinha(`repõe o material: ${escaparHtml(i.nome)}`, moedaBR(i.custo_total), `${Math.round(i.peso_g)}g`)).join('')}
+        <div class="flex justify-between gap-2 pl-3 font-bold">
+            <span class="text-slate-200">↳ Lucro real</span>
+            <span class="font-mono ${f.lucro >= 0 ? 'text-emerald-400' : 'text-red-400'}">${moedaBR(f.lucro)}</span>
+        </div>
+        <div class="text-right text-[10px] text-slate-500">
+            ${margem.toFixed(1)}% da venda${sobreMaterial !== null ? ` · ${sobreMaterial.toFixed(0)}% sobre o material` : ''}
+        </div>
+        <p class="text-[10px] text-slate-500 leading-relaxed pt-1 border-t border-slate-800/80">
+            O material foi pago na compra do rolo: a parte que repõe o material é o seu dinheiro voltando, para comprar o próximo. O lucro real é o que sobra além disso.
+        </p>
+    `;
+}
+
+// ==========================================
+// MODAL DE CONFIGURAÇÕES
+// ==========================================
+async function abrirModalConfiguracoes() {
+    await carregarConfigFinanceira();
+    const t = configFinanceira.taxas_canais;
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+
+    set('cfg-taxa-shopee-pct', t['Shopee'].pct); set('cfg-taxa-shopee-fixa', t['Shopee'].fixa);
+    set('cfg-taxa-ml-pct', t['Mercado Livre'].pct); set('cfg-taxa-ml-fixa', t['Mercado Livre'].fixa);
+    set('cfg-taxa-site-pct', t['Site'].pct); set('cfg-taxa-site-fixa', t['Site'].fixa);
+    set('cfg-taxa-wts-pct', t['WhatsApp'].pct); set('cfg-taxa-wts-fixa', t['WhatsApp'].fixa);
+    set('cfg-potencia', configFinanceira.potencia_media_w);
+    set('cfg-tarifa-kwh', configFinanceira.tarifa_kwh);
+    set('cfg-depreciacao', configFinanceira.depreciacao_hora);
+    set('cfg-imposto-pct', configFinanceira.imposto_pct);
+    set('cfg-margem-padrao', configFinanceira.margem_padrao_pct ?? 100);
+    document.getElementById('cfg-arredondar-90').checked = configFinanceira.arredondar_90 !== false;
+
+    const pag = configFinanceira.taxas_pagamento;
+    set('cfg-pag-pix', pag['Pix']);
+    set('cfg-pag-debito', pag['Débito']);
+    document.getElementById('cfg-taxas-credito').innerHTML = Array.from({ length: MAX_PARCELAS }, (_, i) => `
+        <div>
+            <label class="block text-[10px] text-slate-500 text-center">${i + 1}x</label>
+            <input type="number" step="0.01" min="0" max="100" id="cfg-pag-credito-${i + 1}" value="${Number(pag['Crédito'][i + 1]) || 0}" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-1 text-xs text-slate-100 text-center focus:outline-none focus:border-indigo-500">
+        </div>`).join('');
+    set('cfg-recebimento-padrao', pag.recebimento_padrao || 'na_hora');
+    document.getElementById('cfg-juros-cliente').checked = !!pag.juros_cliente_padrao;
+    atualizarPreviaCustoHora();
+
+    document.getElementById('modal-configuracoes')?.classList.remove('hidden');
+}
+
+function fecharModalConfiguracoes() {
+    document.getElementById('modal-configuracoes')?.classList.add('hidden');
+}
+
+function lerFormularioConfiguracoes() {
+    const num = (id) => parseFloat(document.getElementById(id)?.value) || 0;
+    return {
+        taxas_canais: {
+            'Shopee': { pct: num('cfg-taxa-shopee-pct'), fixa: num('cfg-taxa-shopee-fixa') },
+            'Mercado Livre': { pct: num('cfg-taxa-ml-pct'), fixa: num('cfg-taxa-ml-fixa') },
+            'Site': { pct: num('cfg-taxa-site-pct'), fixa: num('cfg-taxa-site-fixa') },
+            'WhatsApp': { pct: num('cfg-taxa-wts-pct'), fixa: num('cfg-taxa-wts-fixa') }
+        },
+        potencia_media_w: num('cfg-potencia'),
+        tarifa_kwh: num('cfg-tarifa-kwh'),
+        depreciacao_hora: num('cfg-depreciacao'),
+        imposto_pct: num('cfg-imposto-pct'),
+        margem_padrao_pct: num('cfg-margem-padrao'),
+        arredondar_90: !!document.getElementById('cfg-arredondar-90')?.checked,
+        taxas_pagamento: {
+            'Pix': num('cfg-pag-pix'),
+            'Dinheiro': 0,
+            'Débito': num('cfg-pag-debito'),
+            'Crédito': Object.fromEntries(Array.from({ length: MAX_PARCELAS }, (_, i) => [i + 1, num(`cfg-pag-credito-${i + 1}`)])),
+            recebimento_padrao: document.getElementById('cfg-recebimento-padrao')?.value || 'na_hora',
+            juros_cliente_padrao: !!document.getElementById('cfg-juros-cliente')?.checked
+        }
+    };
+}
+
+function atualizarPreviaCustoHora() {
+    const el = document.getElementById('previa-custo-hora');
+    if (!el) return;
+    const cfg = lerFormularioConfiguracoes();
+    const energia = cfg.potencia_media_w / 1000 * cfg.tarifa_kwh;
+    el.innerHTML = `
+        <div class="flex justify-between text-slate-400"><span>Energia (${cfg.potencia_media_w} W × ${moedaBR(cfg.tarifa_kwh)}/kWh)</span><span>${moedaBR(energia)}/h</span></div>
+        <div class="flex justify-between text-slate-400"><span>Depreciação</span><span>${moedaBR(cfg.depreciacao_hora)}/h</span></div>
+        <div class="flex justify-between font-bold border-t border-slate-800 pt-1 mt-1"><span class="text-slate-200">Custo por hora</span><span class="text-amber-300">${moedaBR(custoHoraImpressao(cfg))}/h</span></div>
+    `;
+}
+
+async function salvarConfiguracoes(e) {
+    if (e) e.preventDefault();
+    const novaConfig = lerFormularioConfiguracoes();
+
+    try {
+        const client = obterSupabaseClient();
+        if (!client) throw new Error('Cliente Supabase não inicializado.');
+
+        const { error } = await client
+            .from('config_financeira')
+            .update({ ...novaConfig, updated_at: new Date().toISOString() })
+            .eq('id', 1);
+        if (error) throw error;
+
+        configFinanceira = { ...configFinanceira, ...novaConfig };
+        fecharModalConfiguracoes();
+
+        await recalcularPedidosEmAndamento(client);
+
+        // Preços do catálogo (lista e, se aberto, o cadastro do produto) e o Resumo usam os parâmetros novos
+        if (typeof aplicarFiltrosEExibir === 'function') aplicarFiltrosEExibir();
+        if (typeof atualizarPrecificacaoModal === 'function') atualizarPrecificacaoModal();
+        if (typeof carregarPedidos === 'function') await carregarPedidos();
+        await carregarDadosFinanceiros();
+    } catch (err) {
+        alert('Erro ao salvar parâmetros: ' + err.message);
     }
 }
 
-function inicializarModuloFinancas() {
-    carregarTaxasSalvas();
-    const inputMes = document.getElementById('filtro-financas-mes');
-    if (inputMes && !inputMes.value) {
-        const hoje = new Date();
-        const ano = hoje.getFullYear();
-        const mes = String(hoje.getMonth() + 1).padStart(2, '0');
-        inputMes.value = `${ano}-${mes}`;
-    }
-    carregarCustosFixos();
-    carregarConsumiveis();
-    carregarDadosFinanceiros();
+// Pedidos ainda não pagos passam a usar os parâmetros novos (taxa do canal + forma de pagamento, imposto,
+// custo de máquina). Pedidos em "Pagamento Recebido" ficam como estão: são o histórico.
+async function recalcularPedidosEmAndamento(client) {
+    const { data: pedidos, error } = await client.from('pedidos').select('*').neq('status', 'Pagamento Recebido');
+    if (error) throw error;
+
+    const mudancas = (pedidos || []).map(p => {
+        const novos = calcularValoresFinanceirosPedido({
+            origem: p.origem,
+            valorUnitario: p.valor_total,
+            quantidade: p.quantidade_unidades,
+            tempoImpressao: p.tempo_impressao,
+            formaPagamento: p.forma_pagamento,
+            parcelas: p.parcelas,
+            jurosCliente: p.juros_cliente
+        });
+        const mudou = ['taxa_estimada', 'imposto_estimado', 'custo_maquina'].some(k => Number(p[k]) !== novos[k]);
+        return mudou ? client.from('pedidos').update(novos).eq('id', p.id) : null;
+    }).filter(Boolean);
+
+    const resultados = await Promise.all(mudancas);
+    const falha = resultados.find(r => r.error);
+    if (falha) throw falha.error;
+}
+
+// ==========================================
+// INICIALIZAÇÃO E VISÃO
+// ==========================================
+async function inicializarModuloFinancas() {
+    mesSelecionadoFinancas();
+    await carregarConfigFinanceira();
+    await carregarDadosFinanceiros();
 }
 
 function alternarVisaoFinanceira(visao) {
     visaoFinanceiraAtual = visao;
-    
+
     const btnComp = document.getElementById('btn-visao-competencia');
     const btnCaixa = document.getElementById('btn-visao-caixa');
 
@@ -100,772 +597,458 @@ function alternarVisaoFinanceira(visao) {
     carregarDadosFinanceiros();
 }
 
-// MODAL DE CONFIGURAÇÃO DE TAXAS POR CANAL
-function abrirModalConfigurarTaxas() {
-    carregarTaxasSalvas();
-    
-    const elShopee = document.getElementById('input-taxa-shopee');
-    const elMl = document.getElementById('input-taxa-ml');
-    const elSite = document.getElementById('input-taxa-site');
-    const elWts = document.getElementById('input-taxa-wts');
-
-    if (elShopee) elShopee.value = taxasCanaisConfig['Shopee'] !== undefined ? taxasCanaisConfig['Shopee'] : 15;
-    if (elMl) elMl.value = taxasCanaisConfig['Mercado Livre'] !== undefined ? taxasCanaisConfig['Mercado Livre'] : 10;
-    if (elSite) elSite.value = taxasCanaisConfig['Site'] !== undefined ? taxasCanaisConfig['Site'] : 3;
-    if (elWts) elWts.value = taxasCanaisConfig['WhatsApp'] !== undefined ? taxasCanaisConfig['WhatsApp'] : 0;
-
-    const modal = document.getElementById('modal-configurar-taxas');
-    if (modal) modal.classList.remove('hidden');
-}
-
-function fecharModalConfigurarTaxas() {
-    const modal = document.getElementById('modal-configurar-taxas');
-    if (modal) modal.classList.add('hidden');
-}
-
-function salvarConfiguracaoTaxas(e) {
-    if (e) e.preventDefault();
-
-    const shopee = parseFloat(document.getElementById('input-taxa-shopee')?.value) || 0;
-    const ml = parseFloat(document.getElementById('input-taxa-ml')?.value) || 0;
-    const site = parseFloat(document.getElementById('input-taxa-site')?.value) || 0;
-    const wts = parseFloat(document.getElementById('input-taxa-wts')?.value) || 0;
-
-    taxasCanaisConfig = {
-        'Shopee': shopee,
-        'Mercado Livre': ml,
-        'Site': site,
-        'WhatsApp': wts
-    };
-
-    localStorage.setItem('ilumy3d_taxas_canais', JSON.stringify(taxasCanaisConfig));
-    fecharModalConfigurarTaxas();
-    carregarDadosFinanceiros();
-}
-
-// ==========================================
-// CRUD: CUSTOS FIXOS
-// ==========================================
-async function carregarCustosFixos() {
-    try {
-        const client = obterSupabaseClient();
-        if (!client) return;
-
-        const { data, error } = await client
-            .from('custos_fixos')
-            .select('*')
-            .order('nome', { ascending: true });
-
-        if (error) throw error;
-
-        listaCustosFixosGlobal = data || [];
-        renderizarTabelaCustosFixos();
-    } catch (err) {
-        console.error('Erro ao carregar custos fixos:', err.message);
-    }
-}
-
-function renderizarTabelaCustosFixos() {
-    const tbody = document.getElementById('tabela-custos-fixos-body');
-    if (!tbody) return;
-
-    if (listaCustosFixosGlobal.length === 0) {
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="4" class="py-3 text-center text-slate-500 italic text-[11px]">Nenhum custo fixo cadastrado.</td>
-            </tr>
-        `;
-        return;
-    }
-
-    tbody.innerHTML = listaCustosFixosGlobal.map(c => `
-        <tr class="hover:bg-slate-800/40 border-b border-slate-800/50">
-            <td class="py-2 px-1 font-semibold text-slate-200 truncate max-w-[100px]">${c.nome || '-'}</td>
-            <td class="py-2 px-1 font-mono text-slate-300">R$ ${Number(c.valor || 0).toFixed(2)}</td>
-            <td class="py-2 px-1 font-mono text-slate-400 text-center">Dia ${c.dia_vencimento || '-'}</td>
-            <td class="py-2 px-1 text-right space-x-1 whitespace-nowrap">
-                <button onclick="abrirModalEditarCustoFixo(${c.id})" class="p-1 text-slate-400 hover:text-indigo-400 transition" title="Editar">✏️</button>
-                <button onclick="excluirCustoFixo(${c.id})" class="p-1 text-slate-400 hover:text-red-400 transition" title="Excluir">🗑️</button>
-            </td>
-        </tr>
-    `).join('');
-}
-
-async function salvarNovoCustoFixo(e) {
-    if (e) e.preventDefault();
-
-    const nome = document.getElementById('input-custo-nome')?.value?.trim();
-    const valor = parseFloat(document.getElementById('input-custo-valor')?.value) || 0;
-    const dia = parseInt(document.getElementById('input-custo-dia')?.value, 10) || 1;
-
-    if (!nome || valor <= 0) {
-        alert('Por favor, preencha o nome e um valor válido.');
-        return;
-    }
-
-    try {
-        const client = obterSupabaseClient();
-        if (!client) throw new Error('Cliente Supabase não inicializado.');
-
-        const { error } = await client
-            .from('custos_fixos')
-            .insert([{ nome, valor, dia_vencimento: dia }]);
-
-        if (error) throw error;
-
-        fecharModalCustoFixo();
-        await carregarCustosFixos();
-        await carregarDadosFinanceiros();
-    } catch (err) {
-        alert('Erro ao salvar custo fixo: ' + err.message);
-    }
-}
-
-function abrirModalEditarCustoFixo(id) {
-    const custo = listaCustosFixosGlobal.find(c => c.id === id);
-    if (!custo) return;
-
-    if (document.getElementById('input-editar-custo-id')) document.getElementById('input-editar-custo-id').value = custo.id;
-    if (document.getElementById('input-editar-custo-nome')) document.getElementById('input-editar-custo-nome').value = custo.nome || '';
-    if (document.getElementById('input-editar-custo-valor')) document.getElementById('input-editar-custo-valor').value = custo.valor || 0;
-    if (document.getElementById('input-editar-custo-dia')) document.getElementById('input-editar-custo-dia').value = custo.dia_vencimento || 10;
-
-    const modal = document.getElementById('modal-editar-custo-fixo');
-    if (modal) modal.classList.remove('hidden');
-}
-
-function fecharModalEditarCustoFixo() {
-    const modal = document.getElementById('modal-editar-custo-fixo');
-    if (modal) modal.classList.add('hidden');
-}
-
-async function salvarEdicaoCustoFixo(e) {
-    if (e) e.preventDefault();
-
-    const id = document.getElementById('input-editar-custo-id')?.value;
-    const nome = document.getElementById('input-editar-custo-nome')?.value?.trim();
-    const valor = parseFloat(document.getElementById('input-editar-custo-valor')?.value) || 0;
-    const dia = parseInt(document.getElementById('input-editar-custo-dia')?.value, 10) || 1;
-
-    if (!id || !nome || valor <= 0) {
-        alert('Por favor, preencha os campos corretamente.');
-        return;
-    }
-
-    try {
-        const client = obterSupabaseClient();
-        if (!client) throw new Error('Cliente Supabase não inicializado.');
-
-        const { error } = await client
-            .from('custos_fixos')
-            .update({ nome, valor, dia_vencimento: dia })
-            .eq('id', id);
-
-        if (error) throw error;
-
-        fecharModalEditarCustoFixo();
-        await carregarCustosFixos();
-        await carregarDadosFinanceiros();
-    } catch (err) {
-        alert('Erro ao atualizar custo fixo: ' + err.message);
-    }
-}
-
-async function excluirCustoFixo(id) {
-    if (!confirm('Deseja excluir este custo fixo?')) return;
-
-    try {
-        const client = obterSupabaseClient();
-        if (!client) throw new Error('Cliente Supabase não inicializado.');
-
-        const { error } = await client.from('custos_fixos').delete().eq('id', id);
-        if (error) throw error;
-
-        await carregarCustosFixos();
-        await carregarDadosFinanceiros();
-    } catch (err) {
-        alert('Erro ao excluir custo fixo: ' + err.message);
-    }
-}
-
-function abrirModalCustoFixo() {
-    const modal = document.getElementById('modal-custo-fixo');
-    if (modal) {
-        document.getElementById('form-custo-fixo')?.reset();
-        modal.classList.remove('hidden');
-    }
-}
-
-function fecharModalCustoFixo() {
-    const modal = document.getElementById('modal-custo-fixo');
-    if (modal) modal.classList.add('hidden');
-}
-
-// ==========================================
-// CRUD: CONSUMÍVEIS E INSUMOS
-// ==========================================
-async function carregarConsumiveis() {
-    try {
-        const client = obterSupabaseClient();
-        if (!client) return;
-
-        const { data, error } = await client
-            .from('consumiveis_mensais')
-            .select('*')
-            .order('data_compra', { ascending: false });
-
-        if (error) throw error;
-
-        listaConsumiveisGlobal = data || [];
-        filtrarERenderizarConsumiveisMes();
-    } catch (err) {
-        console.error('Erro ao carregar consumíveis mensais:', err.message);
-    }
-}
-
-function filtrarERenderizarConsumiveisMes() {
-    const inputMes = document.getElementById('filtro-financas-mes');
-    if (!inputMes || !inputMes.value) return [];
-
-    const [anoSel, mesSel] = inputMes.value.split('-');
-
-    const consumiveisMes = listaConsumiveisGlobal.filter(item => {
-        const dataRef = item.data_compra || item.created_at;
-        const dataInfo = extrairAnoMes(dataRef);
-        return dataInfo && dataInfo.ano === String(anoSel) && dataInfo.mes === String(mesSel).padStart(2, '0');
-    });
-
-    renderizarTabelaConsumiveis(consumiveisMes);
-    return consumiveisMes;
-}
-
-function renderizarTabelaConsumiveis(itens) {
-    const tbody = document.getElementById('tabela-consumiveis-body');
-    const resumoAcc = document.getElementById('resumo-consumiveis-insumos');
-    if (!tbody) return;
-
-    const total = itens.reduce((acc, cur) => acc + (Number(cur.valor) || 0), 0);
-    if (resumoAcc) {
-        resumoAcc.textContent = total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-    }
-
-    if (itens.length === 0) {
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="4" class="py-3 text-center text-slate-500 italic text-[11px]">• Nenhum consumível neste mês.</td>
-            </tr>
-        `;
-        return;
-    }
-
-    tbody.innerHTML = itens.map(item => {
-        const dataStr = item.data_compra ? item.data_compra.split('-').reverse().slice(0, 2).join('/') : '-';
-        return `
-            <tr class="hover:bg-slate-800/40 border-b border-slate-800/50">
-                <td class="py-2 px-1 font-semibold text-slate-200 truncate max-w-[100px]" title="${item.nome}">${item.nome || '-'}</td>
-                <td class="py-2 px-1 font-mono text-teal-300">R$ ${Number(item.valor || 0).toFixed(2)}</td>
-                <td class="py-2 px-1 font-mono text-slate-400 text-center">${dataStr}</td>
-                <td class="py-2 px-1 text-right space-x-1 whitespace-nowrap">
-                    <button onclick="abrirModalEditarConsumivel(${item.id})" class="p-1 text-slate-400 hover:text-teal-400 transition" title="Editar">✏️</button>
-                    <button onclick="excluirConsumivel(${item.id})" class="p-1 text-slate-400 hover:text-red-400 transition" title="Excluir">🗑️</button>
-                </td>
-            </tr>
-        `;
-    }).join('');
-}
-
-function abrirModalConsumivel() {
-    const modal = document.getElementById('modal-consumivel');
-    const form = document.getElementById('form-consumivel');
-    if (form) form.reset();
-
-    const inputData = document.getElementById('input-consumivel-data');
-    if (inputData) {
-        const inputMes = document.getElementById('filtro-financas-mes');
-        if (inputMes && inputMes.value) {
-            inputData.value = `${inputMes.value}-01`;
-        } else {
-            inputData.value = new Date().toISOString().split('T')[0];
-        }
-    }
-
-    if (modal) modal.classList.remove('hidden');
-}
-
-function fecharModalConsumivel() {
-    const modal = document.getElementById('modal-consumivel');
-    if (modal) modal.classList.add('hidden');
-}
-
-async function salvarNovoConsumivel(e) {
-    if (e) e.preventDefault();
-
-    const nome = document.getElementById('input-consumivel-nome')?.value?.trim();
-    const valor = parseFloat(document.getElementById('input-consumivel-valor')?.value) || 0;
-    const dataCompra = document.getElementById('input-consumivel-data')?.value || new Date().toISOString().split('T')[0];
-
-    if (!nome || valor <= 0) {
-        alert('Por favor, informe a descrição e um valor válido.');
-        return;
-    }
-
-    try {
-        const client = obterSupabaseClient();
-        if (!client) throw new Error('Cliente Supabase não inicializado.');
-
-        const { error } = await client
-            .from('consumiveis_mensais')
-            .insert([{ nome, valor, data_compra: dataCompra }]);
-
-        if (error) throw error;
-
-        fecharModalConsumivel();
-        await carregarConsumiveis();
-        await carregarDadosFinanceiros();
-    } catch (err) {
-        alert('Erro ao salvar consumível: ' + err.message);
-    }
-}
-
-function abrirModalEditarConsumivel(id) {
-    const item = listaConsumiveisGlobal.find(c => c.id === id);
-    if (!item) return;
-
-    if (document.getElementById('input-editar-consumivel-id')) document.getElementById('input-editar-consumivel-id').value = item.id;
-    if (document.getElementById('input-editar-consumivel-nome')) document.getElementById('input-editar-consumivel-nome').value = item.nome || '';
-    if (document.getElementById('input-editar-consumivel-valor')) document.getElementById('input-editar-consumivel-valor').value = item.valor || 0;
-    if (document.getElementById('input-editar-consumivel-data')) document.getElementById('input-editar-consumivel-data').value = item.data_compra || '';
-
-    const modal = document.getElementById('modal-editar-consumivel');
-    if (modal) modal.classList.remove('hidden');
-}
-
-function fecharModalEditarConsumivel() {
-    const modal = document.getElementById('modal-editar-consumivel');
-    if (modal) modal.classList.add('hidden');
-}
-
-async function salvarEdicaoConsumivel(e) {
-    if (e) e.preventDefault();
-
-    const id = document.getElementById('input-editar-consumivel-id')?.value;
-    const nome = document.getElementById('input-editar-consumivel-nome')?.value?.trim();
-    const valor = parseFloat(document.getElementById('input-editar-consumivel-valor')?.value) || 0;
-    const dataCompra = document.getElementById('input-editar-consumivel-data')?.value;
-
-    if (!id || !nome || valor <= 0 || !dataCompra) {
-        alert('Por favor, preencha todos os campos obrigatórios.');
-        return;
-    }
-
-    try {
-        const client = obterSupabaseClient();
-        if (!client) throw new Error('Cliente Supabase não inicializado.');
-
-        const { error } = await client
-            .from('consumiveis_mensais')
-            .update({ nome, valor, data_compra: dataCompra })
-            .eq('id', id);
-
-        if (error) throw error;
-
-        fecharModalEditarConsumivel();
-        await carregarConsumiveis();
-        await carregarDadosFinanceiros();
-    } catch (err) {
-        alert('Erro ao atualizar consumível: ' + err.message);
-    }
-}
-
-async function excluirConsumivel(id) {
-    if (!confirm('Deseja realmente excluir este item de consumível?')) return;
-
-    try {
-        const client = obterSupabaseClient();
-        if (!client) throw new Error('Cliente Supabase não inicializado.');
-
-        const { error } = await client.from('consumiveis_mensais').delete().eq('id', id);
-        if (error) throw error;
-
-        await carregarConsumiveis();
-        await carregarDadosFinanceiros();
-    } catch (err) {
-        alert('Erro ao excluir consumível: ' + err.message);
-    }
-}
-
 // ==========================================
 // CÁLCULOS DRE, CARDS E GRÁFICOS
 // ==========================================
 async function carregarDadosFinanceiros() {
-    carregarTaxasSalvas();
-    const inputMes = document.getElementById('filtro-financas-mes');
-    if (!inputMes) return;
-
-    if (!inputMes.value) {
-        const hoje = new Date();
-        const ano = hoje.getFullYear();
-        const mes = String(hoje.getMonth() + 1).padStart(2, '0');
-        inputMes.value = `${ano}-${mes}`;
-    }
-
-    const [anoSel, mesSel] = inputMes.value.split('-');
+    const anoMes = mesSelecionadoFinancas();
+    const [anoSel, mesSel] = anoMes.split('-');
+    const noMesSelecionado = (dataValor) => {
+        const info = extrairAnoMes(dataValor);
+        return info && info.ano === anoSel && info.mes === mesSel;
+    };
 
     try {
         const client = obterSupabaseClient();
         if (!client) return;
 
-        // Busca simultânea de Pedidos, Filamentos e Consumíveis
+        await carregarConfigFinanceira();
+        if (typeof carregarImpressoras === 'function' && (typeof listaImpressorasGlobal === 'undefined' || listaImpressorasGlobal.length === 0)) {
+            await carregarImpressoras();
+        }
+
         const [
             { data: pedidos, error: errPedidos },
             { data: filamentos, error: errFilamentos },
-            { data: consumiveis, error: errConsumiveis }
+            { data: comprasFilamento, error: errCompras },
+            despesasMes
         ] = await Promise.all([
             client.from('pedidos').select('*'),
             client.from('filamentos').select('*'),
-            client.from('consumiveis_mensais').select('*')
+            client.from('filamento_compras').select('*').order('data_compra', { ascending: true }),
+            carregarDespesasDoMes(anoMes)
         ]);
 
         if (errPedidos) throw errPedidos;
         if (errFilamentos) console.warn('Aviso estoque filamentos:', errFilamentos.message);
-        if (errConsumiveis) console.warn('Aviso consumíveis mensais:', errConsumiveis.message);
+        if (errCompras) console.warn('Aviso compras de filamento:', errCompras.message);
 
         const todosPedidos = pedidos || [];
         const listaFilamentos = filamentos || [];
-        listaConsumiveisGlobal = consumiveis || [];
+        const mapaFilamentoPorId = {};
+        listaFilamentos.forEach(f => { if (f && f.id) mapaFilamentoPorId[f.id] = f; });
+        const nomeDoFilamento = (f) => `${f.material || ''} ${f.cor || ''}`.trim() || 'Filamento';
 
-        // Filtra consumíveis do mês selecionado
-        const consumiveisMes = listaConsumiveisGlobal.filter(item => {
-            const dataRef = item.data_compra || item.created_at;
-            const dataInfo = extrairAnoMes(dataRef);
-            return dataInfo && dataInfo.ano === String(anoSel) && dataInfo.mes === String(mesSel).padStart(2, '0');
-        });
 
-        renderizarTabelaConsumiveis(consumiveisMes);
-        const totalConsumiveisMes = consumiveisMes.reduce((acc, cur) => acc + (Number(cur.valor) || 0), 0);
-
-        // Mapear custo por grama de cada carretel
-        const mapaCustoFilamentoPorId = {};
-        const mapaCustoFilamentoPorNome = {};
-
+        // Compras de filamento do mês (investimento em estoque)
         let totalInvestimentoEstoqueMes = 0;
-        let qtdCarreteisCompradosMes = 0;
+        let pesoCompradoMes = 0;
         const listaCarreteisCompradosMes = [];
-
-        listaFilamentos.forEach(f => {
-            if (!f) return;
-            const preco = Number(f.preco_custo || f.preco || 0) || 0;
-            const pesoTotal = Number(f.peso_total_g || f.peso_total || f.peso_inicial_g || 1000) || 1000;
-            const custoPorGrama = (preco > 0 && pesoTotal > 0) ? (preco / pesoTotal) : 0.09;
-
-            if (f.id) mapaCustoFilamentoPorId[f.id] = custoPorGrama;
-            
-            const chaveNome = `${f.material || ''} ${f.cor || ''}`.trim() || f.marca || 'PLA Padrão';
-            mapaCustoFilamentoPorNome[chaveNome] = custoPorGrama;
-
-            const dataCriacao = f.created_at || f.data_compra;
-            if (dataCriacao) {
-                const dataInfo = extrairAnoMes(dataCriacao);
-                if (dataInfo && dataInfo.ano === String(anoSel) && dataInfo.mes === String(mesSel).padStart(2, '0')) {
-                    totalInvestimentoEstoqueMes += preco;
-                    qtdCarreteisCompradosMes += 1;
-                    listaCarreteisCompradosMes.push({
-                        nome: `${f.marca || ''} ${f.material || ''} ${f.cor || ''}`.trim() || 'Carretel de Filamento',
-                        preco: preco
-                    });
-                }
-            }
+        (comprasFilamento || []).forEach(c => {
+            if (!noMesSelecionado(c.data_compra)) return;
+            const valor = Number(c.valor_pago || 0) || 0;
+            const peso = Number(c.peso_g || 0) || 0;
+            const filamento = mapaFilamentoPorId[c.filamento_id];
+            totalInvestimentoEstoqueMes += valor;
+            pesoCompradoMes += peso;
+            listaCarreteisCompradosMes.push({
+                nome: `${filamento ? nomeDoFilamento(filamento) : 'Filamento excluído'} · ${Math.round(peso)}g${c.marca ? ` · ${c.marca}` : ''}`,
+                preco: valor
+            });
         });
 
-        // Filtragem de pedidos
+        // Pedidos do mês: competência = data do pedido; caixa = data do recebimento
         const pedidosFiltrados = todosPedidos.filter(p => {
             if (!p) return false;
-            let dataRef = null;
-
-            if (visaoFinanceiraAtual === 'competencia') {
-                dataRef = p.data_pedido || p.created_at;
-            } else {
-                if (p.status_pagamento !== 'Pago' && p.status !== 'Pagamento Recebido') return false;
-                dataRef = p.data_pagamento || p.data_pedido || p.created_at;
-            }
-
-            if (!dataRef) return false;
-            const dataInfo = extrairAnoMes(dataRef);
-            return dataInfo && dataInfo.ano === String(anoSel) && dataInfo.mes === String(mesSel).padStart(2, '0');
+            if (visaoFinanceiraAtual === 'competencia') return noMesSelecionado(p.data_pedido || p.created_at);
+            if (p.status_pagamento !== 'Pago' && p.status !== 'Pagamento Recebido') return false;
+            return noMesSelecionado(p.data_pagamento || p.data_pedido || p.created_at);
         });
 
-        // Agrupamentos e somas
-        let faturamentoBruto = 0;
-        let valorLiberado = 0;
-        let totalCustoInsumo = 0;
-        let estimativaTaxasPlataformas = 0;
-
+        // Somatórios das vendas
+        const tot = { bruto: 0, liberado: 0, taxa: 0, taxaReal: 0, qtdReal: 0, imposto: 0, filamento: 0, maquina: 0, horas: 0, frete: 0 };
         const contagemProdutos = {};
         const contagemCanais = { 'Shopee': 0, 'Mercado Livre': 0, 'Site': 0, 'WhatsApp': 0 };
-        const taxasPorCanalMap = { 'Shopee': 0, 'Mercado Livre': 0, 'Site': 0, 'WhatsApp': 0 };
+        const taxasPorCanal = { 'Shopee': 0, 'Mercado Livre': 0, 'Site': 0, 'WhatsApp': 0 };
         const consumoFilamentos = {};
 
         pedidosFiltrados.forEach(p => {
-            if (!p) return;
-            const qtd = parseInt(p.quantidade_unidades || p.quantidade || p.unidades || 1, 10) || 1;
-            const valUnit = Number(p.valor_total || 0) || 0;
-            const totalPedido = valUnit * qtd;
+            const fin = financeiroDoPedido(p, listaFilamentos);
+            const canal = normalizarCanal(p.origem);
+            const qtd = parseInt(p.quantidade_unidades || p.quantidade || 1, 10) || 1;
 
-            faturamentoBruto += totalPedido;
+            tot.bruto += fin.bruto;
+            tot.taxa += fin.taxa;
+            if (fin.taxaReal) { tot.taxaReal += fin.taxa; tot.qtdReal += 1; }
+            tot.imposto += fin.imposto;
+            tot.filamento += fin.filamento;
+            tot.maquina += fin.maquina;
+            tot.horas += fin.horas;
+            tot.frete += fin.frete;
 
             if (p.status_pagamento === 'Pago' || p.status === 'Pagamento Recebido') {
-                valorLiberado += totalPedido;
+                tot.liberado += fin.bruto - fin.taxa;
             }
 
-            let canal = p.origem || 'WhatsApp';
-            if (canal === 'Site Próprio') canal = 'Site';
-            
-            if (contagemCanais[canal] !== undefined) {
-                contagemCanais[canal] += totalPedido;
-            } else {
-                contagemCanais[canal] = totalPedido;
-            }
+            contagemCanais[canal] = (contagemCanais[canal] || 0) + fin.bruto;
+            taxasPorCanal[canal] = (taxasPorCanal[canal] || 0) + fin.taxa;
 
-            const pctTaxa = (taxasCanaisConfig && taxasCanaisConfig[canal] !== undefined) ? taxasCanaisConfig[canal] : 15;
-            const valorTaxaPedido = (totalPedido * (pctTaxa / 100));
-            estimativaTaxasPlataformas += valorTaxaPedido;
-
-            if (taxasPorCanalMap[canal] !== undefined) {
-                taxasPorCanalMap[canal] += valorTaxaPedido;
-            } else {
-                taxasPorCanalMap[canal] = valorTaxaPedido;
-            }
-
-            // Insumos e CPV
-            const pesoPedidoTotal = Number(p.peso_consumido_g || p.peso_g || 0) || 0;
-            const rawInsumo = p.insumo || (p.filamento_id ? `Carretel #${p.filamento_id}` : 'PLA Padrão');
-            
-            const listaInsumosSeparados = typeof rawInsumo === 'string'
-                ? rawInsumo.split(',').map(i => i.trim()).filter(Boolean)
-                : [];
-            const qtdInsumos = listaInsumosSeparados.length > 0 ? listaInsumosSeparados.length : 1;
-            const pesoPorInsumo = pesoPedidoTotal / qtdInsumos;
-
-            if (listaInsumosSeparados.length === 0) {
-                const insumoNome = 'PLA Padrão';
-                let custoPorG = (p.filamento_id && mapaCustoFilamentoPorId[p.filamento_id])
-                    ? mapaCustoFilamentoPorId[p.filamento_id]
-                    : 0.09;
-
-                const custoItemInsumo = pesoPedidoTotal * custoPorG;
-                totalCustoInsumo += custoItemInsumo;
-
-                if (!consumoFilamentos[insumoNome]) {
-                    consumoFilamentos[insumoNome] = { peso: 0, custoTotal: 0, custoPorGrama: custoPorG };
-                }
-                consumoFilamentos[insumoNome].peso += pesoPedidoTotal;
-                consumoFilamentos[insumoNome].custoTotal += custoItemInsumo;
-            } else {
-                listaInsumosSeparados.forEach(insumoNome => {
-                    let custoPorG = 0.09;
-
-                    if (p.filamento_id && mapaCustoFilamentoPorId[p.filamento_id]) {
-                        custoPorG = mapaCustoFilamentoPorId[p.filamento_id];
-                    } else if (mapaCustoFilamentoPorNome[insumoNome]) {
-                        custoPorG = mapaCustoFilamentoPorNome[insumoNome];
-                    }
-
-                    const custoItemInsumo = pesoPorInsumo * custoPorG;
-                    totalCustoInsumo += custoItemInsumo;
-
-                    if (!consumoFilamentos[insumoNome]) {
-                        consumoFilamentos[insumoNome] = { peso: 0, custoTotal: 0, custoPorGrama: custoPorG };
-                    }
-                    consumoFilamentos[insumoNome].peso += pesoPorInsumo;
-                    consumoFilamentos[insumoNome].custoTotal += custoItemInsumo;
-                });
-            }
+            fin.filamentoItens.forEach(item => {
+                const filamentoAtual = item.filamento_id ? mapaFilamentoPorId[item.filamento_id] : null;
+                const nome = filamentoAtual ? nomeDoFilamento(filamentoAtual) : item.nome;
+                if (!consumoFilamentos[nome]) consumoFilamentos[nome] = { peso: 0, custoTotal: 0 };
+                consumoFilamentos[nome].peso += item.peso_g;
+                consumoFilamentos[nome].custoTotal += item.custo_total;
+            });
 
             const nomeProd = (p.produto && String(p.produto).trim()) ? String(p.produto).trim() : 'Produto Indefinido';
             if (!contagemProdutos[nomeProd]) contagemProdutos[nomeProd] = { qtd: 0, faturamento: 0 };
             contagemProdutos[nomeProd].qtd += qtd;
-            contagemProdutos[nomeProd].faturamento += totalPedido;
+            contagemProdutos[nomeProd].faturamento += fin.bruto;
         });
 
-        const totalCustosFixos = (listaCustosFixosGlobal || []).reduce((acc, c) => acc + (Number(c?.valor || 0) || 0), 0);
-        
-        // LUCRO LÍQUIDO REAL DEDUZINDO TAMBÉM OS CONSUMÍVEIS EXTRAS DO MÊS
-        const lucroLiquido = faturamentoBruto - estimativaTaxasPlataformas - totalCustoInsumo - totalConsumiveisMes - totalCustosFixos;
-        const margemLiquida = faturamentoBruto > 0 ? ((lucroLiquido / faturamentoBruto) * 100) : 0;
+        const agruparPorCategoria = (lista) => {
+            const grupos = {};
+            CATEGORIAS_DESPESA.forEach(c => { grupos[c] = []; });
+            lista.forEach(d => grupos[CATEGORIAS_DESPESA.includes(d.categoria) ? d.categoria : 'Outros'].push(d));
+            return grupos;
+        };
+        const somar = (lista) => lista.reduce((acc, d) => acc + Number(d.valor || 0), 0);
+        const setTexto = (id, texto) => { const el = document.getElementById(id); if (el) el.textContent = texto; };
+        const pintarResultado = (id, valor) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.textContent = moedaBR(valor);
+            el.className = `text-lg md:text-xl font-black ${valor >= 0 ? 'text-emerald-400' : 'text-red-400'}`;
+        };
 
-        // Atualização dos Cards Top
-        const elFat = document.getElementById('card-faturamento');
-        if (elFat) elFat.textContent = faturamentoBruto.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+        // Accordions laterais (sempre pelo mês das despesas/compras)
+        const despesasMesPorCategoria = agruparPorCategoria(despesasMes);
+        const totalManutencaoMes = somar(despesasMesPorCategoria['Manutenção & Peças']);
+        setTexto('resumo-investimento-estoque', moedaBR(totalInvestimentoEstoqueMes));
+        setTexto('resumo-manutencao-pecas', moedaBR(totalManutencaoMes));
+        renderizarAccordionsLaterais(listaCarreteisCompradosMes, despesasMesPorCategoria['Manutenção & Peças']);
 
-        const elLib = document.getElementById('card-liberado');
-        if (elLib) elLib.textContent = valorLiberado.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+        const despesasGerais = despesasMes.filter(d => d.categoria !== CATEGORIA_INVESTIMENTO && d.categoria !== 'Manutenção & Peças');
+        renderizarPainelOrigens({
+            filamento: totalInvestimentoEstoqueMes,
+            qtdComprasFilamento: listaCarreteisCompradosMes.length,
+            manutencao: totalManutencaoMes,
+            equipamentos: somar(despesasMesPorCategoria[CATEGORIA_INVESTIMENTO]),
+            despesas: somar(despesasGerais),
+            pendentes: somar(despesasGerais.filter(d => !d.pago)),
+            qtdPendentes: despesasGerais.filter(d => !d.pago && Number(d.valor) > 0).length
+        });
 
-        const elInvEstoque = document.getElementById('card-investimento-estoque');
-        if (elInvEstoque) elInvEstoque.textContent = totalInvestimentoEstoqueMes.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+        if (visaoFinanceiraAtual === 'caixa') {
+            await renderizarVisaoCaixa({
+                client, anoMes, todosPedidos, pedidosRecebidos: pedidosFiltrados, listaFilamentos,
+                tot, totalInvestimentoEstoqueMes, listaCarreteisCompradosMes, agruparPorCategoria, somar, setTexto, pintarResultado
+            });
+        } else {
+            // VISÃO DE VENDAS: equipamentos são investimento (bem da empresa), não gasto do mês
+            const despesasDoResultado = despesasMes.filter(d => d.categoria !== CATEGORIA_INVESTIMENTO);
+            const totalEquipamentos = somar(despesasMesPorCategoria[CATEGORIA_INVESTIMENTO]);
+            const totalDespesas = somar(despesasDoResultado);
+            const deducoesVendas = tot.taxa + tot.imposto + tot.filamento + tot.maquina + tot.frete;
+            const lucroLiquido = tot.bruto - deducoesVendas - totalDespesas;
+            const margemLiquida = tot.bruto > 0 ? (lucroLiquido / tot.bruto) * 100 : 0;
+            const totalInvestimentos = totalInvestimentoEstoqueMes + totalEquipamentos;
 
-        const elSubInvEstoque = document.getElementById('sub-investimento-estoque');
-        if (elSubInvEstoque) elSubInvEstoque.textContent = `${qtdCarreteisCompradosMes} carretel(éis) no mês`;
+            setTexto('label-faturamento', 'Faturamento Bruto');
+            setTexto('card-faturamento', moedaBR(tot.bruto));
+            setTexto('sub-faturamento', 'Total de pedidos no mês');
+            setTexto('label-liberado', 'Dinheiro Liberado');
+            setTexto('card-liberado', moedaBR(tot.liberado));
+            setTexto('sub-liberado', 'Recebido, já sem as taxas');
+            setTexto('label-investimento', '📦 Investimentos');
+            setTexto('card-investimento-estoque', moedaBR(totalInvestimentos));
+            setTexto('sub-investimento-estoque', `Filamento ${moedaBR(totalInvestimentoEstoqueMes)} · Equip. ${moedaBR(totalEquipamentos)}`);
+            setTexto('label-manutencao', '🛠️ Manut. & Peças');
+            setTexto('card-manutencao-gastos', moedaBR(totalManutencaoMes));
+            setTexto('sub-manutencao', 'Troca bico/óleo/peças');
+            setTexto('label-lucro', 'Lucro Líquido Real');
+            pintarResultado('card-lucro', lucroLiquido);
+            setTexto('sub-lucro', 'Após taxas e custos');
+            setTexto('label-margem', 'Margem Líquida');
+            setTexto('card-margem', `${margemLiquida.toFixed(1)}%`);
+            setTexto('sub-margem', 'Rentabilidade sobre receita');
 
-        const resInvAcc = document.getElementById('resumo-investimento-estoque');
-        if (resInvAcc) resInvAcc.textContent = totalInvestimentoEstoqueMes.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-
-        const resCustosAcc = document.getElementById('resumo-custos-fixos');
-        if (resCustosAcc) resCustosAcc.textContent = totalCustosFixos.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-
-        const elLucro = document.getElementById('card-lucro');
-        if (elLucro) {
-            elLucro.textContent = lucroLiquido.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-            elLucro.className = `text-lg md:text-xl font-black ${lucroLiquido >= 0 ? 'text-emerald-400' : 'text-red-400'}`;
+            const despesasPorCategoria = agruparPorCategoria(despesasDoResultado);
+            renderizarDRE({
+                tot, contagemCanais, taxasPorCanal, consumoFilamentos, despesasPorCategoria,
+                somaCategoria: (cat) => somar(despesasPorCategoria[cat]),
+                lucroLiquido, margemLiquida
+            });
         }
-
-        const elMargem = document.getElementById('card-margem');
-        if (elMargem) elMargem.textContent = `${margemLiquida.toFixed(1)}%`;
-
-        // Renderização DRE
-        renderizarDRE({
-            faturamentoBruto,
-            estimativaTaxasPlataformas,
-            taxasPorCanalMap,
-            totalCustoInsumo,
-            totalConsumiveisMes,
-            consumiveisLista: consumiveisMes,
-            totalCustosFixos,
-            totalInvestimentoEstoqueMes,
-            listaCarreteisCompradosMes,
-            lucroLiquido,
-            margemLiquida,
-            contagemCanais,
-            consumoFilamentos,
-            custosFixosLista: listaCustosFixosGlobal
-        });
 
         renderizarRankings(contagemProdutos, consumoFilamentos);
         renderizarGraficos(todosPedidos, contagemCanais, anoSel);
 
     } catch (err) {
-        console.error('Erro ao carregar dados financeiros:', err.message);
+        console.error('Erro ao carregar dados financeiros:', err.message || err);
     }
 }
 
+// ---------- Peças de layout compartilhadas pelo DRE e pelo Fluxo de Caixa ----------
+function linhaDetalheFin(texto, valor, cor = 'border-red-500/30', corValor = 'text-red-300', sinal = '- ') {
+    return `
+        <div class="flex justify-between items-center py-0.5 border-l-2 ${cor} pl-2">
+            <span class="truncate pr-2">• ${texto}</span>
+            <span class="font-mono ${corValor} shrink-0">${sinal}${moedaBR(valor)}</span>
+        </div>`;
+}
+
+function linhaVaziaFin(texto) {
+    return `<div class="italic text-slate-500 py-0.5">• ${texto}</div>`;
+}
+
+function renderizarLinhasFin(linhas) {
+    const el = document.getElementById('dre-linhas');
+    if (!el) return;
+    el.innerHTML = linhas.filter(l => !(l.ocultarSeZero && l.valor === 0)).map(l => `
+        <div class="space-y-1">
+            <div class="flex justify-between items-center py-1.5 border-b border-slate-800/80 font-bold ${l.positivo ? 'text-slate-200' : 'text-slate-300'}">
+                <span>${l.titulo}${l.nota ? ` <span class="text-[10px] font-normal text-slate-500">(${l.nota})</span>` : ''}</span>
+                <span class="font-mono ${l.positivo ? 'text-emerald-400' : 'text-red-400'}">${l.positivo ? '' : '- '}${moedaBR(l.valor)}</span>
+            </div>
+            <div class="pl-3 space-y-1 text-[11px] text-slate-400">${l.detalhes}</div>
+        </div>
+    `).join('');
+}
+
+function definirCabecalhoResultado(titulo, rotulo, valor, complemento, nota) {
+    const elTitulo = document.getElementById('titulo-dre');
+    if (elTitulo) elTitulo.innerHTML = titulo;
+    const elRotulo = document.getElementById('dre-rotulo-resultado');
+    if (elRotulo) elRotulo.textContent = rotulo;
+    const elValor = document.getElementById('dre-lucro-liquido');
+    if (elValor) {
+        elValor.textContent = moedaBR(valor);
+        elValor.className = `font-mono font-black text-sm ${valor >= 0 ? 'text-emerald-400' : 'text-red-400'}`;
+    }
+    const elComplemento = document.getElementById('dre-margem-porcentagem');
+    if (elComplemento) elComplemento.textContent = complemento;
+    const elNota = document.getElementById('dre-nota-rodape');
+    if (elNota) elNota.innerHTML = nota;
+}
+
+// ---------- VISÃO DE VENDAS (COMPETÊNCIA): "estou lucrando?" ----------
 function renderizarDRE(dados) {
-    const elBruta = document.getElementById('dre-receita-bruta');
-    const elTaxas = document.getElementById('dre-taxas');
-    const elInsumos = document.getElementById('dre-custo-insumos');
-    const elConsumiveis = document.getElementById('dre-consumiveis-extras');
-    const elFixos = document.getElementById('dre-custos-fixos');
-    const elLucro = document.getElementById('dre-lucro-liquido');
-    const elMargem = document.getElementById('dre-margem-porcentagem');
+    const { tot, contagemCanais, taxasPorCanal, consumoFilamentos, despesasPorCategoria, somaCategoria } = dados;
+    const detalhe = linhaDetalheFin;
+    const vazio = linhaVaziaFin;
+    // vazioSeNada = false quando a linha já tem outros detalhes (ex: frete/imposto vindos dos pedidos)
+    const detalhesDespesas = (cat, vazioSeNada = true) => despesasPorCategoria[cat].length
+        ? despesasPorCategoria[cat].map(d => detalhe(`${escaparHtml(d.descricao)}${d.pago ? '' : ' <span class="text-amber-400">(pendente)</span>'}`, d.valor)).join('')
+        : (vazioSeNada ? vazio('Nenhum lançamento neste mês') : '');
 
-    if (elBruta) elBruta.textContent = dados.faturamentoBruto.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-    if (elTaxas) elTaxas.textContent = `- ${dados.estimativaTaxasPlataformas.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`;
-    if (elInsumos) elInsumos.textContent = `- ${dados.totalCustoInsumo.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`;
-    if (elConsumiveis) elConsumiveis.textContent = `- ${(dados.totalConsumiveisMes || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`;
-    if (elFixos) elFixos.textContent = `- ${dados.totalCustosFixos.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`;
-    
-    if (elLucro) {
-        elLucro.textContent = dados.lucroLiquido.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-        elLucro.className = `text-sm font-black ${dados.lucroLiquido >= 0 ? 'text-emerald-400' : 'text-red-400'}`;
-    }
+    renderizarLinhasFin([
+        {
+            titulo: '(+) Receita Bruta de Vendas', valor: tot.bruto, positivo: true,
+            detalhes: Object.entries(contagemCanais).filter(([, v]) => v > 0).map(([canal, v]) => detalhe(canal, v, 'border-emerald-500/30', 'text-emerald-300', '+ ')).join('') || vazio('Nenhuma venda no período')
+        },
+        {
+            titulo: '(-) Taxas de Plataformas / Comissões', valor: tot.taxa,
+            nota: tot.qtdReal > 0 ? `${tot.qtdReal} pedido(s) com valor real recebido` : 'estimadas pela configuração',
+            detalhes: Object.entries(taxasPorCanal).filter(([, v]) => v > 0).map(([canal, v]) => detalhe(canal, v)).join('') || vazio('Sem taxas no período')
+        },
+        {
+            titulo: '(-) Impostos', valor: tot.imposto + somaCategoria('Impostos'),
+            detalhes: (tot.imposto > 0 ? detalhe('Imposto sobre as vendas', tot.imposto) : '') + detalhesDespesas('Impostos', tot.imposto === 0)
+        },
+        {
+            titulo: '(-) Filamento Consumido nas Vendas (CPV)', valor: tot.filamento,
+            detalhes: Object.entries(consumoFilamentos).filter(([, i]) => i.peso > 0).map(([nome, i]) => detalhe(`${escaparHtml(nome)} (${i.peso.toFixed(0)}g)`, i.custoTotal)).join('') || vazio('Nenhum consumo de filamento')
+        },
+        {
+            titulo: '(-) Custo de Máquina (energia + depreciação)', valor: tot.maquina,
+            detalhes: tot.horas > 0 ? detalhe(`${tot.horas.toFixed(1)} h de impressão`, tot.maquina) : vazio('Sem horas de impressão registradas')
+        },
+        {
+            titulo: '(-) Frete', valor: tot.frete + somaCategoria('Frete'), ocultarSeZero: true,
+            detalhes: (tot.frete > 0 ? detalhe('Frete pago nos pedidos', tot.frete) : '') + detalhesDespesas('Frete', tot.frete === 0)
+        },
+        { titulo: '(-) Consumíveis e Insumos Extras', valor: somaCategoria('Consumíveis'), detalhes: detalhesDespesas('Consumíveis') },
+        { titulo: '(-) Ferramentas', valor: somaCategoria('Ferramentas'), ocultarSeZero: true, detalhes: detalhesDespesas('Ferramentas') },
+        { titulo: '(-) Manutenção & Peças', valor: somaCategoria('Manutenção & Peças'), detalhes: detalhesDespesas('Manutenção & Peças') },
+        { titulo: '(-) Custos Fixos', valor: somaCategoria('Custo fixo'), detalhes: detalhesDespesas('Custo fixo') },
+        { titulo: '(-) Marketing', valor: somaCategoria('Marketing'), ocultarSeZero: true, detalhes: detalhesDespesas('Marketing') },
+        { titulo: '(-) Outras Despesas', valor: somaCategoria('Outros'), ocultarSeZero: true, detalhes: detalhesDespesas('Outros') }
+    ]);
 
-    if (elMargem) elMargem.textContent = `(${dados.margemLiquida.toFixed(1)}%)`;
+    definirCabecalhoResultado(
+        '<span>📋</span> Demonstrativo do Resultado (DRE)',
+        '(=) LUCRO LÍQUIDO REAL',
+        dados.lucroLiquido,
+        `(${dados.margemLiquida.toFixed(1)}%)`,
+        'Mostra se o mês deu lucro. Compras de filamento e de equipamentos não entram como gasto: viram bens da empresa (card "Investimentos"). O filamento vira custo quando é usado num pedido, e o desgaste das máquinas entra pela depreciação por hora.'
+    );
+}
 
-    // Detalhe de Receita
-    const elDetReceitas = document.getElementById('dre-detalhe-receitas');
-    if (elDetReceitas) {
-        const canais = Object.entries(dados.contagemCanais || {}).filter(([_, val]) => val > 0);
-        if (canais.length === 0) {
-            elDetReceitas.innerHTML = `<div class="italic text-slate-500 py-0.5">• Nenhuma receita registrada</div>`;
-        } else {
-            elDetReceitas.innerHTML = canais.map(([canal, val]) => `
-                <div class="flex justify-between items-center py-0.5 border-l-2 border-indigo-500/30 pl-2">
-                    <span>• ${canal}</span>
-                    <span class="font-mono text-slate-300">${val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                </div>
-            `).join('');
-        }
-    }
+// ---------- VISÃO DE CAIXA: "quanto dinheiro entrou e saiu da conta?" ----------
+async function renderizarVisaoCaixa(ctx) {
+    const { client, anoMes, todosPedidos, pedidosRecebidos, listaFilamentos, tot, totalInvestimentoEstoqueMes,
+            listaCarreteisCompradosMes, agruparPorCategoria, somar, setTexto, pintarResultado } = ctx;
+    const fimMes = ultimoDiaDoMes(anoMes);
 
-    // Detalhe de Taxas
-    const elDetTaxas = document.getElementById('dre-detalhe-taxas');
-    if (elDetTaxas) {
-        const taxasCanais = Object.entries(dados.taxasPorCanalMap || {}).filter(([_, val]) => val > 0);
-        if (taxasCanais.length === 0) {
-            elDetTaxas.innerHTML = `<div class="italic text-slate-500 py-0.5">• Nenhuma taxa cobrada</div>`;
-        } else {
-            elDetTaxas.innerHTML = taxasCanais.map(([canal, val]) => {
-                const pct = taxasCanaisConfig[canal] !== undefined ? taxasCanaisConfig[canal] : 0;
-                return `
-                    <div class="flex justify-between items-center py-0.5 border-l-2 border-red-500/30 pl-2">
-                        <span>• ${canal} (${pct}%)</span>
-                        <span class="font-mono text-red-300">- ${val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                    </div>
-                `;
-            }).join('');
-        }
-    }
+    // Despesas pagas no mês (pela data do pagamento) e todas as pendentes até o fim do mês
+    const [{ data: pagasNoMes, error: errPagas }, { data: pendentes, error: errPendentes }] = await Promise.all([
+        client.from('despesas').select('*').eq('pago', true).gte('data_pagamento', `${anoMes}-01`).lte('data_pagamento', fimMes),
+        client.from('despesas').select('*').eq('pago', false).lte('data', fimMes)
+    ]);
+    if (errPagas) throw errPagas;
+    if (errPendentes) throw errPendentes;
 
-    // Detalhe de Insumos (CPV)
-    const elDetInsumos = document.getElementById('dre-detalhe-insumos');
-    if (elDetInsumos) {
-        const insumos = Object.entries(dados.consumoFilamentos || {}).filter(([_, item]) => item.peso > 0);
-        if (insumos.length === 0) {
-            elDetInsumos.innerHTML = `<div class="italic text-slate-500 py-0.5">• Nenhum consumo de insumo</div>`;
-        } else {
-            elDetInsumos.innerHTML = insumos.map(([nome, item]) => `
-                <div class="flex justify-between items-center py-0.5 border-l-2 border-red-500/30 pl-2">
-                    <span>• ${nome} (${item.peso.toFixed(0)}g)</span>
-                    <span class="font-mono text-red-300">- ${item.custoTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                </div>
-            `).join('');
-        }
-    }
+    const pagasPorCategoria = agruparPorCategoria((pagasNoMes || []).filter(d => Number(d.valor) > 0));
+    const totalDespesasPagas = somar(pagasNoMes || []);
 
-    // Detalhe de Consumíveis e Insumos Extras (DRE)
-    const elDetConsumiveis = document.getElementById('dre-detalhe-consumiveis');
-    if (elDetConsumiveis) {
-        const itensCons = dados.consumiveisLista || [];
-        if (itensCons.length === 0) {
-            elDetConsumiveis.innerHTML = `<div class="italic text-slate-500 py-0.5">• Nenhum consumível ou insumo extra neste mês</div>`;
-        } else {
-            elDetConsumiveis.innerHTML = itensCons.map(c => `
-                <div class="flex justify-between items-center py-0.5 border-l-2 border-teal-500/30 pl-2">
-                    <span>• ${c.nome}</span>
-                    <span class="font-mono text-red-300">- ${Number(c.valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                </div>
-            `).join('');
-        }
-    }
+    // Entradas: o que caiu na conta (valor real informado ou estimativa sem a taxa).
+    // Crédito mês a mês não entra de uma vez: entra cada parcela no mês da sua data, independente da etapa.
+    const parcelasPorPedido = todosPedidos
+        .filter(pedidoRecebeMesAMes)
+        .map(p => ({ pedido: p, parcelas: parcelasDoPedido(p, listaFilamentos) }));
+    const entradasParcelas = parcelasPorPedido.flatMap(({ pedido, parcelas }) => parcelas
+        .filter(pc => pc.data.slice(0, 7) === anoMes)
+        .map(pc => ({ pedido, valor: pc.valor, real: false, parcela: pc })));
+    const entradas = [
+        ...pedidosRecebidos.filter(p => !pedidoRecebeMesAMes(p)).map(p => {
+            const fin = financeiroDoPedido(p, listaFilamentos);
+            return { pedido: p, valor: fin.bruto - fin.taxa, real: fin.taxaReal };
+        }),
+        ...entradasParcelas
+    ];
+    const totalEntradas = entradas.reduce((acc, e) => acc + e.valor, 0);
 
-    // Detalhe de Custos Fixos
-    const elDetFixos = document.getElementById('dre-detalhe-custos-fixos');
-    if (elDetFixos) {
-        const fixos = dados.custosFixosLista || [];
-        if (fixos.length === 0) {
-            elDetFixos.innerHTML = `<div class="italic text-slate-500 py-0.5">• Nenhum custo fixo cadastrado</div>`;
-        } else {
-            elDetFixos.innerHTML = fixos.map(c => `
-                <div class="flex justify-between items-center py-0.5 border-l-2 border-amber-500/30 pl-2">
-                    <span>• ${c.nome} (Venc: Dia ${c.dia_vencimento || '-'})</span>
-                    <span class="font-mono text-red-300">- ${Number(c.valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                </div>
-            `).join('');
-        }
-    }
+    // Pendências: pedidos ainda não pagos (estimativa já sem a taxa), parcelas dos meses seguintes e despesas pendentes
+    const aReceberPedidos = todosPedidos
+        .filter(p => !pedidoRecebeMesAMes(p) && p.status !== 'Pagamento Recebido' && p.status_pagamento !== 'Pago')
+        .reduce((acc, p) => { const fin = financeiroDoPedido(p, listaFilamentos); return acc + (fin.bruto - fin.taxa); }, 0);
+    const parcelasFuturas = parcelasPorPedido.flatMap(({ parcelas }) => parcelas.filter(pc => pc.data > fimMes));
+    const aReceber = aReceberPedidos + parcelasFuturas.reduce((acc, pc) => acc + pc.valor, 0);
+    const listaPendentes = (pendentes || []).filter(d => Number(d.valor) > 0);
+    const aPagar = somar(listaPendentes);
 
-    // Detalhe de Carretéis Comprados no Accordion Lateral
-    const elListaCarreteisAcc = document.getElementById('lista-detalhe-carreteis-mes');
-    if (elListaCarreteisAcc) {
-        const carreteis = dados.listaCarreteisCompradosMes || [];
-        if (carreteis.length === 0) {
-            elListaCarreteisAcc.innerHTML = `<p class="text-slate-500 italic text-[11px] text-center py-2">• Nenhum carretel cadastrado neste mês.</p>`;
-        } else {
-            elListaCarreteisAcc.innerHTML = carreteis.map(c => `
+    const totalSaidas = totalInvestimentoEstoqueMes + totalDespesasPagas + tot.frete;
+    const saldo = totalEntradas - totalSaidas;
+
+    // Cards
+    setTexto('label-faturamento', 'Entradas no Mês');
+    setTexto('card-faturamento', moedaBR(totalEntradas));
+    setTexto('sub-faturamento', `${entradas.length - entradasParcelas.length} pedido(s)${entradasParcelas.length ? ` + ${entradasParcelas.length} parcela(s)` : ''}`);
+    setTexto('label-liberado', 'A Receber');
+    setTexto('card-liberado', moedaBR(aReceber));
+    setTexto('sub-liberado', parcelasFuturas.length
+        ? `Pedidos não pagos + ${parcelasFuturas.length} parcela(s) futura(s)`
+        : 'Pedidos ainda não pagos (estimado)');
+    setTexto('label-investimento', '📦 Investimentos Pagos');
+    setTexto('card-investimento-estoque', moedaBR(totalInvestimentoEstoqueMes + somar(pagasPorCategoria[CATEGORIA_INVESTIMENTO])));
+    setTexto('sub-investimento-estoque', `Filamento ${moedaBR(totalInvestimentoEstoqueMes)} · Equip. ${moedaBR(somar(pagasPorCategoria[CATEGORIA_INVESTIMENTO]))}`);
+    setTexto('label-manutencao', '🛠️ Manut. Paga');
+    setTexto('card-manutencao-gastos', moedaBR(somar(pagasPorCategoria['Manutenção & Peças'])));
+    setTexto('sub-manutencao', 'Pago neste mês');
+    setTexto('label-lucro', 'Saldo do Mês');
+    pintarResultado('card-lucro', saldo);
+    setTexto('sub-lucro', 'Entradas − saídas');
+    setTexto('label-margem', 'A Pagar');
+    setTexto('card-margem', moedaBR(aPagar));
+    setTexto('sub-margem', `${listaPendentes.length} despesa(s) pendente(s)`);
+
+    // Linhas do fluxo
+    const detalhe = linhaDetalheFin;
+    const vazio = linhaVaziaFin;
+    const dataCurta = (d) => d ? `${String(d).slice(8, 10)}/${String(d).slice(5, 7)}` : '';
+    const linhasDespesasPagas = CATEGORIAS_DESPESA
+        .filter(cat => pagasPorCategoria[cat].length > 0)
+        .map(cat => ({
+            titulo: `(-) ${cat}`,
+            valor: somar(pagasPorCategoria[cat]),
+            detalhes: pagasPorCategoria[cat].map(d => detalhe(`${escaparHtml(d.descricao)} <span class="text-slate-500">pago ${dataCurta(d.data_pagamento)}</span>`, d.valor)).join('')
+        }));
+
+    renderizarLinhasFin([
+        {
+            titulo: '(+) Entradas — pedidos recebidos', valor: totalEntradas, positivo: true,
+            nota: entradasParcelas.length ? 'inclui parcelas de crédito mês a mês' : 'valor que caiu na conta',
+            detalhes: entradas.length
+                ? entradas.map(e => detalhe(
+                    e.parcela
+                        ? `${escaparHtml(e.pedido.cliente || 'Pedido')} · ${normalizarCanal(e.pedido.origem)} · parcela ${e.parcela.numero}/${e.parcela.total} <span class="text-slate-500">${dataCurta(e.parcela.data)} (estimado)</span>`
+                        : `${escaparHtml(e.pedido.cliente || 'Pedido')} · ${normalizarCanal(e.pedido.origem)} <span class="text-slate-500">${dataCurta(String(e.pedido.data_pagamento || '').slice(0, 10))}${e.real ? '' : ' (estimado)'}</span>`,
+                    e.valor, 'border-emerald-500/30', 'text-emerald-300', '+ ')).join('')
+                : vazio('Nenhum pedido recebido neste mês')
+        },
+        {
+            titulo: '(-) Compras de Filamento', valor: totalInvestimentoEstoqueMes,
+            detalhes: listaCarreteisCompradosMes.length
+                ? listaCarreteisCompradosMes.map(c => detalhe(escaparHtml(c.nome), c.preco)).join('')
+                : vazio('Nenhuma compra de filamento neste mês')
+        },
+        ...linhasDespesasPagas,
+        {
+            titulo: '(-) Frete pago nos pedidos', valor: tot.frete, ocultarSeZero: true,
+            detalhes: detalhe('Frete dos pedidos recebidos no mês', tot.frete)
+        },
+        ...(linhasDespesasPagas.length === 0 ? [{ titulo: '(-) Despesas pagas', valor: 0, detalhes: vazio('Nenhuma despesa paga neste mês') }] : [])
+    ]);
+
+    definirCabecalhoResultado(
+        '<span>💵</span> Fluxo de Caixa do Mês',
+        '(=) SALDO DO MÊS',
+        saldo,
+        `(entradas ${moedaBR(totalEntradas)} − saídas ${moedaBR(totalSaidas)})`,
+        'Mostra só o dinheiro que realmente entrou ou saiu da conta neste mês: pedidos pela data do recebimento, despesas pela data do pagamento e filamento pela data da compra. Custo de máquina e filamento consumido não aparecem aqui porque não são saída de dinheiro. O que ainda vai entrar ou sair está nos cards "A Receber" e "A Pagar".'
+    );
+}
+
+// ---------- Painel "De onde vêm os números": cada valor com link para a aba onde é lançado ----------
+function renderizarPainelOrigens(o) {
+    const el = document.getElementById('painel-origens');
+    if (!el) return;
+
+    const linha = (icone, titulo, valor, sub, aba, cor) => `
+        <button onclick="trocarAba('${aba}'); ${aba === 'estoque' ? 'carregarFilamentos();' : aba === 'manutencao' ? 'inicializarModuloManutencao();' : 'inicializarModuloDespesas();'}"
+            class="w-full flex items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-950/50 border border-slate-800 hover:border-slate-600 transition text-left group">
+            <div class="min-w-0">
+                <div class="text-xs font-semibold text-slate-200">${icone} ${titulo}</div>
+                <div class="text-[10px] text-slate-500">${sub}</div>
+            </div>
+            <div class="text-right shrink-0">
+                <div class="font-mono font-bold text-xs ${cor}">${moedaBR(valor)}</div>
+                <div class="text-[10px] text-indigo-400 group-hover:text-indigo-300">ver →</div>
+            </div>
+        </button>`;
+
+    el.innerHTML = [
+        linha('🧵', 'Compras de filamento', o.filamento, `${o.qtdComprasFilamento} compra(s) · Estoque Filamentos`, 'estoque', 'text-purple-300'),
+        linha('🛠️', 'Manutenção & peças', o.manutencao, 'Manut. Impressoras', 'manutencao', 'text-amber-300'),
+        linha('📦', 'Equipamentos / investimentos', o.equipamentos, 'Despesas & Investimentos', 'despesas', 'text-purple-300'),
+        linha('💸', 'Despesas gerais', o.despesas, o.qtdPendentes ? `${o.qtdPendentes} pendente(s): ${moedaBR(o.pendentes)} · Despesas & Investimentos` : 'Tudo pago no mês · Despesas & Investimentos', 'despesas', 'text-rose-300')
+    ].join('');
+}
+
+// ---------- Accordions laterais: compras de filamento e manutenção do mês ----------
+function renderizarAccordionsLaterais(compras, gastosManutencao) {
+    const elCompras = document.getElementById('lista-detalhe-carreteis-mes');
+    if (elCompras) {
+        elCompras.innerHTML = compras.length === 0
+            ? `<p class="text-slate-500 italic text-[11px] text-center py-2">• Nenhuma compra de filamento neste mês.</p>`
+            : compras.map(c => `
                 <div class="flex justify-between items-center py-1 border-b border-slate-800/60 text-xs">
-                    <span class="font-bold text-slate-200">• ${c.nome}</span>
-                    <span class="font-mono font-bold text-purple-300">${c.preco.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                </div>
-            `).join('');
-        }
+                    <span class="font-bold text-slate-200 truncate pr-2">• ${escaparHtml(c.nome)}</span>
+                    <span class="font-mono font-bold text-purple-300 shrink-0">${moedaBR(c.preco)}</span>
+                </div>`).join('');
+    }
+
+    const elManut = document.getElementById('lista-detalhe-manutencao-mes');
+    if (elManut) {
+        elManut.innerHTML = gastosManutencao.length === 0
+            ? `<p class="text-slate-500 italic text-[11px] text-center py-2">• Nenhum gasto de manutenção neste mês.</p>`
+            : gastosManutencao.map(d => `
+                <div class="flex justify-between items-center py-1 border-b border-slate-800/60 text-xs">
+                    <span class="font-bold text-slate-200 truncate pr-2">• ${escaparHtml(d.descricao)}</span>
+                    <span class="font-mono font-bold text-amber-300 shrink-0">${moedaBR(d.valor)}</span>
+                </div>`).join('');
     }
 }
 
@@ -920,7 +1103,21 @@ function renderizarGraficos(todosPedidos, contagemCanais, anoSel) {
 
     (todosPedidos || []).forEach(p => {
         if (!p) return;
-        const dataRef = p.data_pedido || p.created_at;
+        // Caixa + crédito mês a mês: cada parcela no mês em que cai (inclusive meses futuros)
+        if (visaoFinanceiraAtual === 'caixa' && pedidoRecebeMesAMes(p)) {
+            const qtdP = parseInt(p.quantidade_unidades || p.quantidade || 1, 10) || 1;
+            const brutoParcela = (Number(p.valor_total || 0) * qtdP) / Number(p.parcelas);
+            parcelasDoPedido(p).forEach(pc => {
+                if (pc.data.slice(0, 4) === String(anoSel)) faturamentoPorMes[parseInt(pc.data.slice(5, 7), 10) - 1] += brutoParcela;
+            });
+            return;
+        }
+        // Vendas: mês do pedido. Caixa: só pedidos recebidos, no mês do recebimento
+        const recebido = p.status === 'Pagamento Recebido' || p.status_pagamento === 'Pago';
+        if (visaoFinanceiraAtual === 'caixa' && !recebido) return;
+        const dataRef = visaoFinanceiraAtual === 'caixa'
+            ? (p.data_pagamento || p.data_pedido || p.created_at)
+            : (p.data_pedido || p.created_at);
         const dataInfo = extrairAnoMes(dataRef);
         if (dataInfo && dataInfo.ano === String(anoSel)) {
             const m = parseInt(dataInfo.mes, 10) - 1;
@@ -942,9 +1139,9 @@ function renderizarGraficos(todosPedidos, contagemCanais, anoSel) {
                 data: {
                     labels: mesesNomes,
                     datasets: [{
-                        label: `Faturamento ${anoSel} (R$)`,
+                        label: `${visaoFinanceiraAtual === 'caixa' ? 'Recebido' : 'Faturamento'} ${anoSel} (R$)`,
                         data: faturamentoPorMes,
-                        backgroundColor: '#6366f1',
+                        backgroundColor: corDoTema('indigo', 500),
                         borderRadius: 6
                     }]
                 },
@@ -953,8 +1150,8 @@ function renderizarGraficos(todosPedidos, contagemCanais, anoSel) {
                     maintainAspectRatio: false,
                     plugins: { legend: { display: false } },
                     scales: {
-                        x: { ticks: { color: '#94a3b8', font: { size: 10 } }, grid: { display: false } },
-                        y: { ticks: { color: '#94a3b8', font: { size: 10 } }, grid: { color: '#1e293b' } }
+                        x: { ticks: { color: corDoTema('slate', 400), font: { size: 10 } }, grid: { display: false } },
+                        y: { ticks: { color: corDoTema('slate', 400), font: { size: 10 } }, grid: { color: corDoTema('slate', 800) } }
                     }
                 }
             });
@@ -975,7 +1172,7 @@ function renderizarGraficos(todosPedidos, contagemCanais, anoSel) {
                         data: Object.values(contagemCanais || {}),
                         backgroundColor: ['#EE4D2D', '#FFE600', '#2563EB', '#25D366'],
                         borderWidth: 2,
-                        borderColor: '#0f172a'
+                        borderColor: corDoTema('slate', 900)
                     }]
                 },
                 options: {
@@ -984,7 +1181,7 @@ function renderizarGraficos(todosPedidos, contagemCanais, anoSel) {
                     plugins: {
                         legend: {
                             position: 'bottom',
-                            labels: { color: '#cbd5e1', font: { size: 10 }, boxWidth: 12 }
+                            labels: { color: corDoTema('slate', 300), font: { size: 10 }, boxWidth: 12 }
                         }
                     }
                 }
@@ -999,26 +1196,11 @@ if (typeof window !== 'undefined') {
     window.inicializarModuloFinancas = inicializarModuloFinancas;
     window.carregarDadosFinanceiros = carregarDadosFinanceiros;
     window.alternarVisaoFinanceira = alternarVisaoFinanceira;
-    window.abrirModalConfigurarTaxas = abrirModalConfigurarTaxas;
-    window.fecharModalConfigurarTaxas = fecharModalConfigurarTaxas;
-    window.salvarConfiguracaoTaxas = salvarConfiguracaoTaxas;
 
-    // Custos Fixos
-    window.abrirModalCustoFixo = abrirModalCustoFixo;
-    window.fecharModalCustoFixo = fecharModalCustoFixo;
-    window.salvarNovoCustoFixo = salvarNovoCustoFixo;
-    window.abrirModalEditarCustoFixo = abrirModalEditarCustoFixo;
-    window.fecharModalEditarCustoFixo = fecharModalEditarCustoFixo;
-    window.salvarEdicaoCustoFixo = salvarEdicaoCustoFixo;
-    window.excluirCustoFixo = excluirCustoFixo;
-
-    // Consumíveis e Insumos
-    window.carregarConsumiveis = carregarConsumiveis;
-    window.abrirModalConsumivel = abrirModalConsumivel;
-    window.fecharModalConsumivel = fecharModalConsumivel;
-    window.salvarNovoConsumivel = salvarNovoConsumivel;
-    window.abrirModalEditarConsumivel = abrirModalEditarConsumivel;
-    window.fecharModalEditarConsumivel = fecharModalEditarConsumivel;
-    window.salvarEdicaoConsumivel = salvarEdicaoConsumivel;
-    window.excluirConsumivel = excluirConsumivel;
+    // Configurações
+    window.abrirModalConfiguracoes = abrirModalConfiguracoes;
+    window.fecharModalConfiguracoes = fecharModalConfiguracoes;
+    window.salvarConfiguracoes = salvarConfiguracoes;
+    window.atualizarPreviaCustoHora = atualizarPreviaCustoHora;
+    // Despesas e custos fixos são exportados por despesas.js
 }
